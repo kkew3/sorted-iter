@@ -26,22 +26,22 @@ use std::iter::Peekable;
 ///     assert_eq!(um.next(), None);
 /// }
 /// ```
-pub struct Union<I, J, U, V, C>
+pub struct Union<I, J, C>
 where
-    I: Iterator<Item = U>,
-    J: Iterator<Item = V>,
-    C: Comparator<U, V>,
+    I: Iterator,
+    J: Iterator,
+    C: Comparator<I::Item, J::Item>,
 {
     iter1: Peekable<I>,
     iter2: Peekable<J>,
     compare: C,
 }
 
-impl<I, J, U, V, C> Union<I, J, U, V, C>
+impl<I, J, C> Union<I, J, C>
 where
-    I: Iterator<Item = U>,
-    J: Iterator<Item = V>,
-    C: Comparator<U, V>,
+    I: Iterator,
+    J: Iterator,
+    C: Comparator<I::Item, J::Item>,
 {
     pub fn new(iter1: I, iter2: J, compare: C) -> Self {
         Self {
@@ -52,13 +52,31 @@ where
     }
 }
 
-impl<I, J, U, V, C> Iterator for Union<I, J, U, V, C>
+impl<I, J, C> Clone for Union<I, J, C>
 where
-    I: Iterator<Item = U>,
-    J: Iterator<Item = V>,
-    C: Comparator<U, V>,
+    I: Iterator + Clone,
+    J: Iterator + Clone,
+    C: Comparator<I::Item, J::Item>,
+    I::Item: Clone,
+    J::Item: Clone,
+    C: Clone,
 {
-    type Item = (Option<U>, Option<V>);
+    fn clone(&self) -> Self {
+        Self {
+            iter1: self.iter1.clone(),
+            iter2: self.iter2.clone(),
+            compare: self.compare.clone(),
+        }
+    }
+}
+
+impl<I, J, C> Iterator for Union<I, J, C>
+where
+    I: Iterator,
+    J: Iterator,
+    C: Comparator<I::Item, J::Item>,
+{
+    type Item = (Option<I::Item>, Option<J::Item>);
 
     fn next(&mut self) -> Option<Self::Item> {
         match (self.iter1.peek(), self.iter2.peek()) {
