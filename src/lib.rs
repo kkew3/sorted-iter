@@ -1,14 +1,28 @@
-pub fn add(left: u64, right: u64) -> u64 {
-    left + right
+mod sorted_iter;
+
+pub use sorted_iter::UnionMap;
+
+use std::cmp::Ordering;
+use std::marker::PhantomData;
+
+pub trait Comparator<U, V> {
+    fn compare(&self, u: &U, v: &V) -> Ordering;
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+pub struct NaturalComparator<U: Ord> {
+    phantom: PhantomData<U>,
+}
 
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
+impl<U: Ord> NaturalComparator<U> {
+    pub fn new() -> Self {
+        Self {
+            phantom: PhantomData::default(),
+        }
+    }
+}
+
+impl<U: Ord> Comparator<U, U> for NaturalComparator<U> {
+    fn compare(&self, u: &U, v: &U) -> Ordering {
+        u.cmp(v)
     }
 }
