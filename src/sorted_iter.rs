@@ -56,10 +56,9 @@ impl<I, J, C> Clone for Union<I, J, C>
 where
     I: Iterator + Clone,
     J: Iterator + Clone,
-    C: Comparator<I::Item, J::Item>,
+    C: Comparator<I::Item, J::Item> + Clone,
     I::Item: Clone,
     J::Item: Clone,
-    C: Clone,
 {
     fn clone(&self) -> Self {
         Self {
@@ -159,7 +158,7 @@ mod tests {
     }
 
     #[test]
-    fn test_union_map() {
+    fn test_union() {
         // === CASE 1: empty inputs ===
         let v1 = vec_of_keyvalues(vec![], 1);
         let v2 = vec_of_keyvalues(vec![], 11);
