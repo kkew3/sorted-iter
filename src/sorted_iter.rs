@@ -122,8 +122,11 @@ mod tests {
     }
 
     macro_rules! kv_pair {
-        ($k1:expr, $v1:expr; $k2:expr, $v2:expr) => {
+        (?; $k1:expr, $v1:expr; $k2:expr, $v2:expr) => {
             (Some(kv!($k1, $v1)), Some(kv!($k2, $v2)))
+        };
+        (!; $k1:expr, $v1:expr; $k2:expr, $v2:expr) => {
+            (kv!($k1, $v1), kv!($k2, $v2))
         };
         ($k1:expr, $v1:expr; _) => {
             (Some(kv!($k1, $v1)), None)
@@ -204,9 +207,9 @@ mod tests {
         let v2 = vec_of_keyvalues(vec![2, 3, 5], 11);
         let mut um =
             Union::new(v1.into_iter(), v2.into_iter(), ComparatorOnKey);
-        assert_eq!(um.next(), Some(kv_pair!(2, 1; 2, 11)));
-        assert_eq!(um.next(), Some(kv_pair!(3, 2; 3, 12)));
-        assert_eq!(um.next(), Some(kv_pair!(5, 3; 5, 13)));
+        assert_eq!(um.next(), Some(kv_pair!(?; 2, 1; 2, 11)));
+        assert_eq!(um.next(), Some(kv_pair!(?; 3, 2; 3, 12)));
+        assert_eq!(um.next(), Some(kv_pair!(?; 5, 3; 5, 13)));
         assert_eq!(um.next(), None);
 
         // === CASE 6: left subset right ===
@@ -215,10 +218,10 @@ mod tests {
         let mut um =
             Union::new(v1.into_iter(), v2.into_iter(), ComparatorOnKey);
         assert_eq!(um.next(), Some(kv_pair!(_; 2, 11)));
-        assert_eq!(um.next(), Some(kv_pair!(3, 1; 3, 12)));
+        assert_eq!(um.next(), Some(kv_pair!(?; 3, 1; 3, 12)));
         assert_eq!(um.next(), Some(kv_pair!(_; 4, 13)));
-        assert_eq!(um.next(), Some(kv_pair!(5, 2; 5, 14)));
-        assert_eq!(um.next(), Some(kv_pair!(8, 3; 8, 15)));
+        assert_eq!(um.next(), Some(kv_pair!(?; 5, 2; 5, 14)));
+        assert_eq!(um.next(), Some(kv_pair!(?; 8, 3; 8, 15)));
         assert_eq!(um.next(), Some(kv_pair!(_; 9, 16)));
         assert_eq!(um.next(), None);
 
@@ -228,10 +231,10 @@ mod tests {
         let mut um =
             Union::new(v1.into_iter(), v2.into_iter(), ComparatorOnKey);
         assert_eq!(um.next(), Some(kv_pair!(2, 1; _)));
-        assert_eq!(um.next(), Some(kv_pair!(3, 2; 3, 11)));
+        assert_eq!(um.next(), Some(kv_pair!(?; 3, 2; 3, 11)));
         assert_eq!(um.next(), Some(kv_pair!(4, 3; _)));
-        assert_eq!(um.next(), Some(kv_pair!(5, 4; 5, 12)));
-        assert_eq!(um.next(), Some(kv_pair!(8, 5; 8, 13)));
+        assert_eq!(um.next(), Some(kv_pair!(?; 5, 4; 5, 12)));
+        assert_eq!(um.next(), Some(kv_pair!(?; 8, 5; 8, 13)));
         assert_eq!(um.next(), Some(kv_pair!(9, 6; _)));
         assert_eq!(um.next(), None);
 
@@ -240,12 +243,12 @@ mod tests {
         let v2 = vec_of_keyvalues(vec![2, 3, 7, 8, 9], 11);
         let mut um =
             Union::new(v1.into_iter(), v2.into_iter(), ComparatorOnKey);
-        assert_eq!(um.next(), Some(kv_pair!(2, 1; 2, 11)));
+        assert_eq!(um.next(), Some(kv_pair!(?; 2, 1; 2, 11)));
         assert_eq!(um.next(), Some(kv_pair!(_; 3, 12)));
         assert_eq!(um.next(), Some(kv_pair!(5, 2; _)));
         assert_eq!(um.next(), Some(kv_pair!(6, 3; _)));
         assert_eq!(um.next(), Some(kv_pair!(_; 7, 13)));
-        assert_eq!(um.next(), Some(kv_pair!(8, 4; 8, 14)));
+        assert_eq!(um.next(), Some(kv_pair!(?; 8, 4; 8, 14)));
         assert_eq!(um.next(), Some(kv_pair!(_; 9, 15)));
     }
 }
