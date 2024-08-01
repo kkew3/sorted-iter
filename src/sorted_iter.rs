@@ -10,7 +10,8 @@ use std::iter::Peekable;
 /// Usage example:
 ///
 /// ```
-/// use sorted_iter::{NaturalComparator, Union};
+/// use sorted_iter::Union;
+/// use sorted_iter::comparators::NaturalComparator;
 ///
 /// fn using_union() {
 ///     let v1 = vec![3, 5];
@@ -123,7 +124,8 @@ where
 /// Usage example:
 ///
 /// ```
-/// use sorted_iter::{NaturalComparator, Intersection};
+/// use sorted_iter::Intersection;
+/// use sorted_iter::comparators::NaturalComparator;
 ///
 /// fn using_intersection() {
 ///     let v1 = vec![3, 5];
@@ -240,7 +242,8 @@ where
 /// Usage example:
 ///
 /// ```
-/// use sorted_iter::{NaturalComparator, Difference};
+/// use sorted_iter::Difference;
+/// use sorted_iter::comparators::NaturalComparator;
 ///
 /// fn using_difference() {
 ///     let v1 = vec![3, 5];
