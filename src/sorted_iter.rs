@@ -250,5 +250,6 @@ mod tests {
         assert_eq!(um.next(), Some(kv_pair!(_; 7, 13)));
         assert_eq!(um.next(), Some(kv_pair!(?; 8, 4; 8, 14)));
         assert_eq!(um.next(), Some(kv_pair!(_; 9, 15)));
+        assert_eq!(um.next(), None);
     }
 }
