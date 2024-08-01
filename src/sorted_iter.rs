@@ -104,6 +104,19 @@ where
     }
 }
 
+impl<'a, I, J, C> Union<I, J, C>
+where
+    I: Iterator + 'a,
+    J: Iterator + 'a,
+    C: Comparator<I::Item, J::Item> + 'a,
+{
+    pub fn into_boxed(
+        self,
+    ) -> Box<dyn Iterator<Item = (Option<I::Item>, Option<J::Item>)> + 'a> {
+        Box::new(self)
+    }
+}
+
 /// Visits the values representing the intersection of two *strictly* sorted
 /// iterators, comparing with `compare`. Yields 2-tuples of type `(U, V)`.
 ///
@@ -205,6 +218,19 @@ where
     }
 }
 
+impl<'a, I, J, C> Intersection<I, J, C>
+where
+    I: Iterator + 'a,
+    J: Iterator + 'a,
+    C: Comparator<I::Item, J::Item> + 'a,
+{
+    pub fn into_boxed(
+        self,
+    ) -> Box<dyn Iterator<Item = (I::Item, J::Item)> + 'a> {
+        Box::new(self)
+    }
+}
+
 /// Visits the values representing the difference of two *strictly* sorted
 /// iterators (i.e., first minus second), comparing with `compare`. The joint
 /// elements are not directly removed, but as in other iterators in this
@@ -299,6 +325,19 @@ where
 
     fn size_hint(&self) -> (usize, Option<usize>) {
         self.iter1.size_hint()
+    }
+}
+
+impl<'a, I, J, C> Difference<I, J, C>
+where
+    I: Iterator + 'a,
+    J: Iterator + 'a,
+    C: Comparator<I::Item, J::Item> + 'a,
+{
+    pub fn into_boxed(
+        self,
+    ) -> Box<dyn Iterator<Item = (I::Item, Option<J::Item>)> + 'a> {
+        Box::new(self)
     }
 }
 
