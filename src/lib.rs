@@ -1,6 +1,6 @@
 mod sorted_iter;
 
-pub use sorted_iter::Union;
+pub use sorted_iter::{Union, Intersection};
 
 use std::cmp::Ordering;
 use std::marker::PhantomData;
