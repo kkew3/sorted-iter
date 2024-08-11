@@ -53,23 +53,6 @@ where
     }
 }
 
-impl<I, J, C> Clone for Union<I, J, C>
-where
-    I: Iterator + Clone,
-    J: Iterator + Clone,
-    C: Comparator<I::Item, J::Item> + Clone,
-    I::Item: Clone,
-    J::Item: Clone,
-{
-    fn clone(&self) -> Self {
-        Self {
-            iter1: self.iter1.clone(),
-            iter2: self.iter2.clone(),
-            compare: self.compare.clone(),
-        }
-    }
-}
-
 impl<I, J, C> Iterator for Union<I, J, C>
 where
     I: Iterator,
@@ -161,23 +144,6 @@ where
             iter1,
             iter2: iter2.peekable(),
             compare,
-        }
-    }
-}
-
-impl<I, J, C> Clone for Intersection<I, J, C>
-where
-    I: Iterator + Clone,
-    J: Iterator + Clone,
-    C: Comparator<I::Item, J::Item> + Clone,
-    I::Item: Clone,
-    J::Item: Clone,
-{
-    fn clone(&self) -> Self {
-        Self {
-            iter1: self.iter1.clone(),
-            iter2: self.iter2.clone(),
-            compare: self.compare.clone(),
         }
     }
 }
@@ -280,23 +246,6 @@ where
             iter1,
             iter2: iter2.peekable(),
             compare,
-        }
-    }
-}
-
-impl<I, J, C> Clone for Difference<I, J, C>
-where
-    I: Iterator + Clone,
-    J: Iterator + Clone,
-    C: Comparator<I::Item, J::Item> + Clone,
-    I::Item: Clone,
-    J::Item: Clone,
-{
-    fn clone(&self) -> Self {
-        Self {
-            iter1: self.iter1.clone(),
-            iter2: self.iter2.clone(),
-            compare: self.compare.clone(),
         }
     }
 }
