@@ -689,7 +689,8 @@ impl<'a, T, C: Comparator<T, T>> Iterator for MultiWayUnion<'a, T, C> {
 #[cfg(test)]
 mod multi_way_union_tests {
     use super::MultiWayUnion;
-    use crate::comparators::NaturalComparator;
+    use crate::Comparator;
+    use std::cmp::Ordering;
 
     macro_rules! assert_size_hint {
         ($itr:ident, $lb:expr, $ub:expr) => {{
@@ -704,31 +705,44 @@ mod multi_way_union_tests {
         }};
     }
 
+    struct FirstComparator;
+
+    impl Comparator<(i32, char), (i32, char)> for FirstComparator {
+        fn compare(&self, u: &(i32, char), v: &(i32, char)) -> Ordering {
+            u.0.cmp(&v.0)
+        }
+    }
+
     #[test]
     fn test_multi_way_union_iterator() {
-        let a = vec![1, 3, 5, 6].into_iter();
-        let b = vec![0, 1, 4, 5, 7].into_iter();
-        let c = vec![0, 2, 3, 5, 7, 8].into_iter();
-        let mut u = MultiWayUnion::new([a, b, c], NaturalComparator::new())
-            .into_boxed();
+        let a = vec![(1, 'a'), (3, 'b'), (5, 'c'), (6, 'd')].into_iter();
+        let b =
+            vec![(0, 'e'), (1, 'f'), (4, 'g'), (5, 'h'), (7, 'i')].into_iter();
+        let c =
+            vec![(0, 'j'), (2, 'k'), (3, 'l'), (5, 'm'), (7, 'n'), (8, 'o')]
+                .into_iter();
+        let mut u = MultiWayUnion::new([a, b, c], FirstComparator).into_boxed();
         assert_size_hint!(u, 9, Some(9));
-        assert_eq!(u.next(), Some(vec![None, Some(0), Some(0)]));
+        assert_eq!(u.next(), Some(vec![None, Some((0, 'e')), Some((0, 'j'))]));
         assert_size_hint!(u, 8, Some(8));
-        assert_eq!(u.next(), Some(vec![Some(1), Some(1), None]));
+        assert_eq!(u.next(), Some(vec![Some((1, 'a')), Some((1, 'f')), None]));
         assert_size_hint!(u, 7, Some(7));
-        assert_eq!(u.next(), Some(vec![None, None, Some(2)]));
+        assert_eq!(u.next(), Some(vec![None, None, Some((2, 'k'))]));
         assert_size_hint!(u, 6, Some(6));
-        assert_eq!(u.next(), Some(vec![Some(3), None, Some(3)]));
+        assert_eq!(u.next(), Some(vec![Some((3, 'b')), None, Some((3, 'l'))]));
         assert_size_hint!(u, 5, Some(5));
-        assert_eq!(u.next(), Some(vec![None, Some(4), None]));
+        assert_eq!(u.next(), Some(vec![None, Some((4, 'g')), None]));
         assert_size_hint!(u, 4, Some(4));
-        assert_eq!(u.next(), Some(vec![Some(5), Some(5), Some(5)]));
+        assert_eq!(
+            u.next(),
+            Some(vec![Some((5, 'c')), Some((5, 'h')), Some((5, 'm'))])
+        );
         assert_size_hint!(u, 3, Some(3));
-        assert_eq!(u.next(), Some(vec![Some(6), None, None]));
+        assert_eq!(u.next(), Some(vec![Some((6, 'd')), None, None]));
         assert_size_hint!(u, 2, Some(2));
-        assert_eq!(u.next(), Some(vec![None, Some(7), Some(7)]));
+        assert_eq!(u.next(), Some(vec![None, Some((7, 'i')), Some((7, 'n'))]));
         assert_size_hint!(u, 1, Some(1));
-        assert_eq!(u.next(), Some(vec![None, None, Some(8)]));
+        assert_eq!(u.next(), Some(vec![None, None, Some((8, 'o'))]));
         assert_size_hint!(u, 0, Some(0));
         assert_eq!(u.next(), None);
         assert_size_hint!(u, 0, Some(0));
