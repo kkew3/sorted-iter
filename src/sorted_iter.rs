@@ -1,7 +1,7 @@
 //! Heavily inspired by https://github.com/rklaehn/sorted-iter.
 
 use super::Comparator;
-use std::cmp::{max, min, Ordering};
+use std::cmp::{self, Ordering};
 use std::iter::Peekable;
 
 /// Visits the values representing the union of two *strictly* sorted iterators,
@@ -78,7 +78,7 @@ where
         let (min1, max1) = self.iter1.size_hint();
         let (min2, max2) = self.iter2.size_hint();
         // Full overlap.
-        let rmin = max(min1, min2);
+        let rmin = cmp::max(min1, min2);
         // No overlap.
         let rmax = match (max1, max2) {
             (Some(max1), Some(max2)) => max1.checked_add(max2),
@@ -179,7 +179,7 @@ where
         let rmin = 0;
         // Full overlap.
         let rmax = match (max1, max2) {
-            (Some(max1), Some(max2)) => Some(min(max1, max2)),
+            (Some(max1), Some(max2)) => Some(cmp::min(max1, max2)),
             _ => None,
         };
         (rmin, rmax)

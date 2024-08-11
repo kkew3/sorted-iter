@@ -1,7 +1,7 @@
 pub mod comparators;
 mod sorted_iter;
 
-pub use sorted_iter::{Union, Intersection, Difference};
+pub use sorted_iter::{Difference, Intersection, Union};
 
 use std::cmp::Ordering;
 
