@@ -391,8 +391,13 @@ mod tournament_tree_tests {
         ]
     }
 
+    fn new_iters3() -> Vec<IndexedPeekedIterator<Box<dyn Iterator<Item = i32>>>>
+    {
+        vec![new_indexed_peeked_itr!(0; 2, 4, 5)]
+    }
+
     #[test]
-    fn test_build_tt_1() {
+    fn test_init_tt_1() {
         let iters = new_iters1();
         let compare =
             IndexedPeekedIteratorComparator::from(NaturalComparator::new());
@@ -414,7 +419,7 @@ mod tournament_tree_tests {
     }
 
     #[test]
-    fn test_build_tt_2() {
+    fn test_init_tt_2() {
         let iters = new_iters2();
         let compare =
             IndexedPeekedIteratorComparator::from(NaturalComparator::new());
@@ -424,6 +429,16 @@ mod tournament_tree_tests {
             peeks,
             vec![Some(&(2, 0)), Some(&(3, 2)), Some(&(5, 1)), Some(&(4, 3)),]
         );
+    }
+
+    #[test]
+    fn test_init_tt_3() {
+        let iters = new_iters3();
+        let compare =
+            IndexedPeekedIteratorComparator::from(NaturalComparator::new());
+        let tt = init_tt(iters, &compare);
+        let peeks: Vec<_> = tt.iter().map(|it| it.peek()).collect();
+        assert_eq!(peeks, vec![Some(&(2, 0))]);
     }
 
     #[test]
@@ -569,6 +584,34 @@ mod tournament_tree_tests {
         assert_eq!(popped, None);
         let peeks: Vec<_> = tt.iter().map(|it| it.peek()).collect();
         assert_eq!(peeks, vec![None, None, None, None]);
+    }
+
+    #[test]
+    fn test_pop_and_find_next_tt_3() {
+        let iters = new_iters3();
+        let compare =
+            IndexedPeekedIteratorComparator::from(NaturalComparator::new());
+        let mut tt = init_tt(iters, &compare);
+
+        let popped = pop_and_find_next_tt(&mut tt, &compare);
+        assert_eq!(popped, Some((2, 0)));
+        let peeks: Vec<_> = tt.iter().map(|it| it.peek()).collect();
+        assert_eq!(peeks, vec![Some(&(4, 0))]);
+
+        let popped = pop_and_find_next_tt(&mut tt, &compare);
+        assert_eq!(popped, Some((4, 0)));
+        let peeks: Vec<_> = tt.iter().map(|it| it.peek()).collect();
+        assert_eq!(peeks, vec![Some(&(5, 0))]);
+
+        let popped = pop_and_find_next_tt(&mut tt, &compare);
+        assert_eq!(popped, Some((5, 0)));
+        let peeks: Vec<_> = tt.iter().map(|it| it.peek()).collect();
+        assert_eq!(peeks, vec![None]);
+
+        let popped = pop_and_find_next_tt(&mut tt, &compare);
+        assert_eq!(popped, None);
+        let peeks: Vec<_> = tt.iter().map(|it| it.peek()).collect();
+        assert_eq!(peeks, vec![None]);
     }
 }
 
