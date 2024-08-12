@@ -1,5 +1,6 @@
 use crate::{box_iterator, Comparator};
 use std::cmp::Ordering;
+use std::iter::Peekable;
 use std::marker::PhantomData;
 use std::mem::MaybeUninit;
 
@@ -884,5 +885,332 @@ mod multi_way_union_tests {
             Some(vec![Some((5, 'c')), Some((5, 'h')), Some((5, 'm'))])
         );
         assert_eq!(u.nth(5), None);
+    }
+}
+
+/// Visits the values representing the intersection of `K>0` *strictly* sorted
+/// iterators, comparing with `compare`. Yields `Vec<T>` of length `K`.
+///
+/// Usage example:
+///
+/// ```
+/// use sorted_iter::MultiWayIntersection;
+/// use sorted_iter::comparators::NaturalComparator;
+///
+/// fn using_multi_way_union() {
+///     let v1 = vec![3, 5];
+///     let v2 = vec![2, 3];
+///     let v3 = vec![2, 3, 5];
+///     let mut um = MultiWayIntersection::new(
+///         [v1.into_iter(), v2.into_iter(), v3.into_iter()],
+///         NaturalComparator::new(),
+///     );
+///     assert_eq!(um.next(), Some(vec![3, 3, 3]));
+///     assert_eq!(um.next(), None);
+/// }
+/// ```
+pub struct MultiWayIntersection<'a, T, C: Comparator<T, T>> {
+    iters: Vec<Peekable<Box<dyn Iterator<Item = T> + 'a>>>,
+    compare: C,
+    exhausted: bool,
+}
+
+impl<'a, T: 'a, C: Comparator<T, T> + 'a> MultiWayIntersection<'a, T, C> {
+    /// Construct new instance from homogeneous collection of iterators. There
+    /// should be at least one iterator.
+    pub fn new<I: Iterator<Item = T> + 'a>(
+        iters: impl IntoIterator<Item = I>,
+        compare: C,
+    ) -> Self {
+        Self::from_boxed(iters.into_iter().map(box_iterator), compare)
+    }
+
+    /// Construct new instance from collection of boxed iterators. There should
+    /// be at least one iterator.
+    pub fn from_boxed(
+        iters: impl IntoIterator<Item = Box<dyn Iterator<Item = T> + 'a>>,
+        compare: C,
+    ) -> Self {
+        let iters: Vec<_> = iters.into_iter().collect();
+        assert!(!iters.is_empty());
+        Self {
+            iters: iters.into_iter().map(|it| it.peekable()).collect(),
+            compare,
+            exhausted: false,
+        }
+    }
+
+    pub fn into_boxed(self) -> Box<dyn Iterator<Item = Vec<T>> + 'a> {
+        Box::new(self)
+    }
+}
+
+enum MultiWayIntersectionState {
+    /// If any sub-iterator is exhausted.
+    Exhausted,
+    /// If current value does not constitute an intersection.
+    NotIntersection,
+    /// An intersection is found.
+    Ok,
+}
+
+/// Step each iterator `i` until `i.peek()` is either `None` or a value as
+/// large as `value`. If any `i.peek()` is `None`, `Exhausted` is returned
+/// immediately. Otherwise, return `NotIntersection` or `Ok` accordingly. If
+/// the output vec `out` is provided initialized, it will be populated when
+/// `Ok` is to be returned.
+fn step_iters_until_as_large_as_value_and_collect<T, C: Comparator<T, T>>(
+    iters: &mut [Peekable<Box<dyn Iterator<Item = T> + '_>>],
+    compare: &C,
+    value: T,
+    out: Option<&mut Vec<T>>,
+) -> MultiWayIntersectionState {
+    let mut form_intersection = true;
+    for itr in iters.iter_mut() {
+        while let Some(itr_value) = itr.peek() {
+            match compare.compare(itr_value, &value) {
+                Ordering::Less => itr.next(),
+                Ordering::Equal => break,
+                Ordering::Greater => {
+                    form_intersection = false;
+                    break;
+                }
+            };
+        }
+        if itr.peek().is_none() {
+            return MultiWayIntersectionState::Exhausted;
+        }
+    }
+    if form_intersection {
+        if let Some(v) = out {
+            v.push(value);
+            for itr in iters.iter_mut() {
+                v.push(itr.next().unwrap());
+            }
+        }
+        MultiWayIntersectionState::Ok
+    } else {
+        MultiWayIntersectionState::NotIntersection
+    }
+}
+
+impl<'a, T, C: Comparator<T, T>> Iterator for MultiWayIntersection<'a, T, C> {
+    type Item = Vec<T>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.exhausted {
+            return None;
+        }
+
+        let mut ret = Vec::with_capacity(self.iters.len());
+        let (head, tail) = self.iters.split_first_mut().unwrap();
+        loop {
+            match head.next() {
+                None => break None,
+                Some(value) => {
+                    match step_iters_until_as_large_as_value_and_collect(
+                        tail,
+                        &self.compare,
+                        value,
+                        Some(&mut ret),
+                    ) {
+                        MultiWayIntersectionState::Exhausted => {
+                            self.exhausted = true;
+                            break None;
+                        }
+                        MultiWayIntersectionState::NotIntersection => (),
+                        MultiWayIntersectionState::Ok => break Some(ret),
+                    }
+                }
+            }
+        }
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        use std::cmp;
+
+        if self.exhausted {
+            (0, Some(0))
+        } else {
+            // No overlap.
+            let rmin = 0usize;
+
+            // Full overlap.
+            fn take_max(
+                maxes: impl IntoIterator<Item = Option<usize>>,
+            ) -> Option<usize> {
+                let mut max = 0usize;
+                for e in maxes.into_iter() {
+                    match e {
+                        None => return None,
+                        Some(value) => max = cmp::max(max, value),
+                    }
+                }
+                Some(max)
+            }
+
+            let rmax = take_max(self.iters.iter().map(|it| it.size_hint().1));
+            (rmin, rmax)
+        }
+    }
+
+    fn nth(&mut self, mut n: usize) -> Option<Self::Item> {
+        if self.exhausted {
+            return None;
+        }
+
+        let mut ret = Vec::with_capacity(self.iters.len());
+        let (head, tail) = self.iters.split_first_mut().unwrap();
+        loop {
+            match head.next() {
+                None => break None,
+                Some(value) => {
+                    match step_iters_until_as_large_as_value_and_collect(
+                        tail,
+                        &self.compare,
+                        value,
+                        if n == 0 { Some(&mut ret) } else { None },
+                    ) {
+                        MultiWayIntersectionState::Exhausted => {
+                            self.exhausted = true;
+                            break None;
+                        }
+                        MultiWayIntersectionState::NotIntersection => (),
+                        MultiWayIntersectionState::Ok => {
+                            if n == 0 {
+                                break Some(ret);
+                            } else {
+                                n -= 1;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod multi_way_intersection_tests {
+    use super::MultiWayIntersection;
+    use crate::Comparator;
+    use std::cmp::Ordering;
+
+    macro_rules! assert_size_hint {
+        ($itr:ident, $lb:expr, $ub:expr) => {{
+            let (min, max) = $itr.size_hint();
+            assert!(min <= $lb);
+            match (max, $ub) {
+                (Some(max), Some(ub)) => assert!(max >= ub),
+                (Some(max), None) => panic!("ub `{}` is not inf", max),
+                (None, Some(_)) => panic!("ub `inf` is too loose"),
+                (None, None) => (),
+            }
+        }};
+    }
+
+    struct FirstComparator;
+
+    impl Comparator<(i32, char), (i32, char)> for FirstComparator {
+        fn compare(&self, u: &(i32, char), v: &(i32, char)) -> Ordering {
+            u.0.cmp(&v.0)
+        }
+    }
+
+    #[test]
+    fn test_multi_way_intersection_iterator_single() {
+        let a = vec![(1, 'a'), (3, 'b'), (5, 'c'), (6, 'd')].into_iter();
+        let mut u = MultiWayIntersection::new([a], FirstComparator);
+        assert_size_hint!(u, 4, Some(4));
+        assert_eq!(u.next(), Some(vec![(1, 'a')]));
+        assert_size_hint!(u, 3, Some(3));
+        assert_eq!(u.next(), Some(vec![(3, 'b')]));
+        assert_size_hint!(u, 2, Some(2));
+        assert_eq!(u.next(), Some(vec![(5, 'c')]));
+        assert_size_hint!(u, 1, Some(1));
+        assert_eq!(u.next(), Some(vec![(6, 'd')]));
+        assert_size_hint!(u, 0, Some(0));
+        assert_eq!(u.next(), None);
+        assert_size_hint!(u, 0, Some(0));
+        assert_eq!(u.next(), None);
+    }
+
+    #[test]
+    fn test_multi_way_intersection_iterator() {
+        let a = vec![
+            (1, 'a'),
+            (3, 'b'),
+            (5, 'c'),
+            (6, 'd'),
+            (8, 'q'),
+            (10, 'r'),
+            (11, 's'),
+            (15, 't'),
+        ]
+        .into_iter();
+        let b =
+            vec![(0, 'e'), (1, 'f'), (3, 'g'), (4, 'h'), (5, 'i'), (7, 'j')]
+                .into_iter();
+        let c =
+            vec![(0, 'k'), (2, 'l'), (3, 'm'), (5, 'n'), (7, 'o'), (8, 'p')]
+                .into_iter();
+        let mut u = MultiWayIntersection::new([a, b, c], FirstComparator);
+        assert_size_hint!(u, 2, Some(2));
+        assert_eq!(u.next(), Some(vec![(3, 'b'), (3, 'g'), (3, 'm')]));
+        assert_size_hint!(u, 1, Some(1));
+        assert_eq!(u.next(), Some(vec![(5, 'c'), (5, 'i'), (5, 'n')]));
+        assert_size_hint!(u, 0, Some(0));
+        assert_eq!(u.next(), None);
+        assert_size_hint!(u, 0, Some(0));
+        assert_eq!(u.next(), None);
+    }
+
+    #[test]
+    fn test_multi_way_intersection_nth() {
+        let a = vec![
+            (1, 'a'),
+            (3, 'b'),
+            (5, 'c'),
+            (6, 'd'),
+            (8, 'q'),
+            (10, 'r'),
+            (11, 's'),
+            (15, 't'),
+        ]
+        .into_iter();
+        let b =
+            vec![(0, 'e'), (1, 'f'), (3, 'g'), (4, 'h'), (5, 'i'), (7, 'j')]
+                .into_iter();
+        let c =
+            vec![(0, 'k'), (2, 'l'), (3, 'm'), (5, 'n'), (7, 'o'), (8, 'p')]
+                .into_iter();
+        let mut u = MultiWayIntersection::new([a, b, c], FirstComparator);
+        assert_eq!(u.nth(0), Some(vec![(3, 'b'), (3, 'g'), (3, 'm')]));
+        assert_size_hint!(u, 1, Some(1));
+        assert_eq!(u.nth(4), None);
+        assert_size_hint!(u, 0, Some(0));
+
+        let a = vec![
+            (1, 'a'),
+            (3, 'b'),
+            (5, 'c'),
+            (6, 'd'),
+            (8, 'q'),
+            (10, 'r'),
+            (11, 's'),
+            (15, 't'),
+        ]
+        .into_iter();
+        let b =
+            vec![(0, 'e'), (1, 'f'), (3, 'g'), (4, 'h'), (5, 'i'), (7, 'j')]
+                .into_iter();
+        let c =
+            vec![(0, 'k'), (2, 'l'), (3, 'm'), (5, 'n'), (7, 'o'), (8, 'p')]
+                .into_iter();
+        let mut u = MultiWayIntersection::new([a, b, c], FirstComparator);
+        assert_eq!(u.nth(1), Some(vec![(5, 'c'), (5, 'i'), (5, 'n')]));
+        assert_size_hint!(u, 0, Some(0));
+        assert_eq!(u.nth(0), None);
+        assert_size_hint!(u, 0, Some(0));
     }
 }

@@ -2,7 +2,7 @@ pub mod comparators;
 mod multiway_sorted_iter;
 mod sorted_iter;
 
-pub use multiway_sorted_iter::MultiWayUnion;
+pub use multiway_sorted_iter::{MultiWayIntersection, MultiWayUnion};
 pub use sorted_iter::{Difference, Intersection, Union};
 
 use std::cmp::Ordering;
