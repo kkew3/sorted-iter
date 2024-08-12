@@ -616,7 +616,8 @@ mod tournament_tree_tests {
 }
 
 impl<'a, T: 'a, C: Comparator<T, T> + 'a> MultiWayUnion<'a, T, C> {
-    /// Construct new instance from homogeneous collection of iterators.
+    /// Construct new instance from homogeneous collection of iterators. There
+    /// should be at least one iterator.
     pub fn new<I: Iterator<Item = T> + 'a>(
         iters: impl IntoIterator<Item = I>,
         compare: C,
@@ -624,13 +625,15 @@ impl<'a, T: 'a, C: Comparator<T, T> + 'a> MultiWayUnion<'a, T, C> {
         Self::from_boxed(iters.into_iter().map(box_iterator), compare)
     }
 
-    /// Construct new instance from collection of boxed iterators.
+    /// Construct new instance from collection of boxed iterators. There should
+    /// be at least one iterator.
     pub fn from_boxed(
         iters: impl IntoIterator<Item = Box<dyn Iterator<Item = T> + 'a>>,
         compare: C,
     ) -> Self {
         let iters: Vec<_> = iters.into_iter().collect();
         let n_iters = iters.len();
+        assert!(n_iters > 0);
         let n_iters_total = n_iters.next_power_of_two();
         let sentinels: Vec<_> = (iters.len()..n_iters_total)
             .map(|_| Box::new(NoneIter::new()) as Box<dyn Iterator<Item = T>>)
