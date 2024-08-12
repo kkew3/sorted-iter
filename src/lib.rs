@@ -7,6 +7,7 @@ pub use sorted_iter::{Difference, Intersection, Union};
 
 use std::cmp::Ordering;
 
+/// An external comparator of two objects.
 pub trait Comparator<U, V> {
     fn compare(&self, u: &U, v: &V) -> Ordering;
 }

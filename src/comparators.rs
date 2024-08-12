@@ -2,6 +2,7 @@ use crate::Comparator;
 use std::cmp::Ordering;
 use std::marker::PhantomData;
 
+/// A comparator that follow the natural ordering of objects.
 pub struct NaturalComparator<U: Ord> {
     phantom: PhantomData<U>,
 }
