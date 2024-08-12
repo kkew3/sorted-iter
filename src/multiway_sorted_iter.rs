@@ -1,4 +1,4 @@
-use crate::Comparator;
+use crate::{box_iterator, Comparator};
 use std::cmp::Ordering;
 use std::marker::PhantomData;
 use std::mem::MaybeUninit;
@@ -578,12 +578,7 @@ impl<'a, T: 'a, C: Comparator<T, T> + 'a> MultiWayUnion<'a, T, C> {
         iters: impl IntoIterator<Item = I>,
         compare: C,
     ) -> Self {
-        Self::from_boxed(
-            iters
-                .into_iter()
-                .map(|it| Box::new(it) as Box<dyn Iterator<Item = T>>),
-            compare,
-        )
+        Self::from_boxed(iters.into_iter().map(box_iterator), compare)
     }
 
     /// Construct new instance from collection of boxed iterators.
