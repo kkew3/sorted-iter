@@ -849,6 +849,24 @@ mod multi_way_union_tests {
     }
 
     #[test]
+    fn test_multi_way_union_iterator_single() {
+        let a = vec![(1, 'a'), (3, 'b'), (5, 'c'), (6, 'd')].into_iter();
+        let mut u = MultiWayUnion::new([a], FirstComparator).into_boxed();
+        assert_size_hint!(u, 4, Some(4));
+        assert_eq!(u.next(), Some(vec![Some((1, 'a'))]));
+        assert_size_hint!(u, 3, Some(3));
+        assert_eq!(u.next(), Some(vec![Some((3, 'b'))]));
+        assert_size_hint!(u, 2, Some(2));
+        assert_eq!(u.next(), Some(vec![Some((5, 'c'))]));
+        assert_size_hint!(u, 1, Some(1));
+        assert_eq!(u.next(), Some(vec![Some((6, 'd'))]));
+        assert_size_hint!(u, 0, Some(0));
+        assert_eq!(u.next(), None);
+        assert_size_hint!(u, 0, Some(0));
+        assert_eq!(u.next(), None);
+    }
+
+    #[test]
     fn test_multi_way_union_nth() {
         let a = vec![(1, 'a'), (3, 'b'), (5, 'c'), (6, 'd')].into_iter();
         let b =
