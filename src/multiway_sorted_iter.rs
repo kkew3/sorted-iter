@@ -612,6 +612,54 @@ impl<'a, T: 'a, C: Comparator<T, T> + 'a> MultiWayUnion<'a, T, C> {
     }
 }
 
+/// Pop from the tournament tree (`tt`) all elements whose value is equal to
+/// `value`, comparing using `compare`, and collect them if the output vec
+/// (`out`) is provided. When `out` is provided, it should already be
+/// initialized. If `out` is provided, it's guaranteed that after the call, it
+/// will contain at least one element `value` at index `index`.
+fn find_equal_value_and_collect<T, C: Comparator<T, T>>(
+    tt: &mut [IndexedPeekedIterator<Box<dyn Iterator<Item = T> + '_>>],
+    value: T,
+    index: usize,
+    compare: &IndexedPeekedIteratorComparator<T, C>,
+    mut out: Option<&mut Vec<Option<T>>>,
+) {
+    // Loop and pop from the tournament tree until we don't need to pop.
+    loop {
+        // Peek the tournament tree and decide if the tree needs to be popped.
+        // The answer is yes, if the next value is equal to `value`, different
+        // only in `index`.
+        let need_pop_next = match tt.first().unwrap().peek() {
+            None => false,
+            Some((value_to_pop, _)) => {
+                match compare.inner.compare(&value, value_to_pop) {
+                    Ordering::Less | Ordering::Greater => false,
+                    Ordering::Equal => true,
+                }
+            }
+        };
+        // Break out from the loop.
+        if !need_pop_next {
+            break;
+        }
+        // Pop from the tournament tree.
+        let (next_value, next_index) =
+            pop_and_find_next_tt(tt, compare).unwrap();
+        // If the output vec, `out`, is provided, and if the popped element is
+        // not from a sentinel (if it's from a sentinel, `next_index` will be
+        // `>= v.len()`), insert `next_value` to the output vector.
+        if let Some(ref mut v) = out {
+            if let Some(pos) = v.get_mut(next_index) {
+                pos.get_or_insert(next_value);
+            }
+        }
+    }
+    // Finally, if the output vec, `out`, is provided, insert `value` to it.
+    if let Some(ref mut v) = out {
+        v.get_mut(index).unwrap().get_or_insert(value);
+    }
+}
+
 impl<'a, T, C: Comparator<T, T>> Iterator for MultiWayUnion<'a, T, C> {
     type Item = Vec<Option<T>>;
 
@@ -624,33 +672,13 @@ impl<'a, T, C: Comparator<T, T>> Iterator for MultiWayUnion<'a, T, C> {
                 for _ in 0..self.len {
                     ret.push(None);
                 }
-
-                loop {
-                    let need_pop_next = match self.tt.first().unwrap().peek() {
-                        None => false,
-                        Some((value_to_pop, _)) => {
-                            match self
-                                .compare
-                                .inner
-                                .compare(&value, value_to_pop)
-                            {
-                                Ordering::Less | Ordering::Greater => false,
-                                Ordering::Equal => true,
-                            }
-                        }
-                    };
-                    if !need_pop_next {
-                        break;
-                    }
-                    let (next_value, next_index) =
-                        pop_and_find_next_tt(&mut self.tt, &self.compare)
-                            .unwrap();
-                    if let Some(v_pos) = ret.get_mut(next_index) {
-                        v_pos.get_or_insert(next_value);
-                    }
-                }
-
-                ret.get_mut(index).unwrap().get_or_insert(value);
+                find_equal_value_and_collect(
+                    &mut self.tt,
+                    value,
+                    index,
+                    &self.compare,
+                    Some(&mut ret),
+                );
                 Some(ret)
             }
         }
@@ -678,6 +706,39 @@ impl<'a, T, C: Comparator<T, T>> Iterator for MultiWayUnion<'a, T, C> {
 
         let rmax = checked_add_sum(bounds.iter().map(|(_, b)| b).copied());
         (rmin, rmax)
+    }
+
+    fn nth(&mut self, mut n: usize) -> Option<Self::Item> {
+        // Similar to `next()`, but don't allocate memory for return in the
+        // first n-1 rounds.
+        loop {
+            match pop_and_find_next_tt(&mut self.tt, &self.compare) {
+                None => break None,
+                Some((value, index)) => {
+                    let mut ret = if n == 0 {
+                        let mut v: Vec<Option<T>> =
+                            Vec::with_capacity(self.len);
+                        for _ in 0..self.len {
+                            v.push(None);
+                        }
+                        Some(v)
+                    } else {
+                        None
+                    };
+                    find_equal_value_and_collect(
+                        &mut self.tt,
+                        value,
+                        index,
+                        &self.compare,
+                        ret.as_mut(),
+                    );
+                    if n == 0 {
+                        break ret;
+                    }
+                    n -= 1;
+                }
+            }
+        }
     }
 }
 
@@ -742,5 +803,22 @@ mod multi_way_union_tests {
         assert_eq!(u.next(), None);
         assert_size_hint!(u, 0, Some(0));
         assert_eq!(u.next(), None);
+    }
+
+    #[test]
+    fn test_multi_way_union_nth() {
+        let a = vec![(1, 'a'), (3, 'b'), (5, 'c'), (6, 'd')].into_iter();
+        let b =
+            vec![(0, 'e'), (1, 'f'), (4, 'g'), (5, 'h'), (7, 'i')].into_iter();
+        let c =
+            vec![(0, 'j'), (2, 'k'), (3, 'l'), (5, 'm'), (7, 'n'), (8, 'o')]
+                .into_iter();
+        let mut u = MultiWayUnion::new([a, b, c], FirstComparator).into_boxed();
+        assert_eq!(u.nth(4), Some(vec![None, Some((4, 'g')), None]));
+        assert_eq!(
+            u.nth(0),
+            Some(vec![Some((5, 'c')), Some((5, 'h')), Some((5, 'm'))])
+        );
+        assert_eq!(u.nth(5), None);
     }
 }
