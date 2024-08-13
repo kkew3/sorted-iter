@@ -298,8 +298,10 @@ fn init_tt<'a, T, C: Comparator<T, T>>(
     let mut p = n_iters;
     while p > 1 {
         for i in (n_iters..n_iters + p).filter(|x| x % 2 == 0) {
-            let a = unsafe { tt.get(i).unwrap().assume_init_ref() };
-            let b = unsafe { tt.get(i + 1).unwrap().assume_init_ref() };
+            // SAFETY: i < n_iters + p <= tt.len() == 2 * n_iters.
+            let a = unsafe { tt.get_unchecked(i).assume_init_ref() };
+            // SAFETY: i, p and n_iters are even, so i + 1 < n_iters + p.
+            let b = unsafe { tt.get_unchecked(i + 1).assume_init_ref() };
             let (winner, loser) = match compare.compare(a, b) {
                 // If a <= b, then winner is a, and loser is b.
                 Ordering::Less | Ordering::Equal => (i, i + 1),
@@ -325,15 +327,18 @@ fn pop_and_find_next_tt<T, C: Comparator<T, T>>(
     compare: &IndexedPeekedIteratorComparator<T, C>,
 ) -> Option<(T, usize)> {
     assert!(tt.len().is_power_of_two());
-    match tt.first_mut().unwrap().next() {
+    // SAFETY: tt.len() is a power of 2.
+    match unsafe { tt.get_unchecked_mut(0).next() } {
         // tt.first is the smallest. If the smallest is None (infinity), then
         // all the others must also be None.
         None => None,
         Some((value, index)) => {
             let mut i = (index + tt.len()) / 2;
             while i > 0 {
-                let a = tt.first().unwrap();
-                let b = tt.get(i).unwrap();
+                // SAFETY: tt.len() is a power of 2.
+                let a = unsafe { tt.get_unchecked(0) };
+                // SAFETY: index < tt.len(), so i < tt.len().
+                let b = unsafe { tt.get_unchecked(i) };
                 if let Ordering::Greater = compare.compare(a, b) {
                     // a is loser.
                     tt.swap(0, i);
@@ -678,7 +683,8 @@ fn find_equal_value_and_collect<T, C: Comparator<T, T>>(
         // Peek the tournament tree and decide if the tree needs to be popped.
         // The answer is yes, if the next value is equal to `value`, different
         // only in `index`.
-        let need_pop_next = match tt.first().unwrap().peek() {
+        // SAFETY: tt.len() is a power of 2.
+        let need_pop_next = match unsafe { tt.get_unchecked(0).peek() } {
             None => false,
             Some((value_to_pop, _)) => {
                 match compare.inner.compare(&value, value_to_pop) {
@@ -692,8 +698,9 @@ fn find_equal_value_and_collect<T, C: Comparator<T, T>>(
             break;
         }
         // Pop from the tournament tree.
+        // SAFETY: already checked `need_pop_next`.
         let (next_value, next_index) =
-            pop_and_find_next_tt(tt, compare).unwrap();
+            unsafe { pop_and_find_next_tt(tt, compare).unwrap_unchecked() };
         // If the output vec, `out`, is provided, and if the popped element is
         // not from a sentinel (if it's from a sentinel, `next_index` will be
         // `>= v.len()`), insert `next_value` to the output vector.
