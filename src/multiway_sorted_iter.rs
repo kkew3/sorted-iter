@@ -1,5 +1,5 @@
 use crate::{box_iterator, Comparator};
-use std::cmp::Ordering;
+use std::cmp::{self, Ordering};
 use std::iter::Peekable;
 use std::marker::PhantomData;
 use std::mem::MaybeUninit;
@@ -41,19 +41,21 @@ impl<I: Iterator> Iterator for IndexedPeekedIterator<I> {
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
-        let (mut min, mut max) = self.inner.size_hint();
-        if self.buf.is_some() {
-            // We always need to add 1 to the lower bound in order to take
-            // into account the buffered item.
-            min += 1;
-            if let Some(max) = max.as_mut() {
-                // When the upper bound of `self.inner` is tight, we will need
-                // to add 1 to the upper bound, taking account the buffered
-                // item.
-                *max += 1;
+        let (min, max) = self.inner.size_hint();
+        match self.buf {
+            None => (min, max),
+            Some(_) => {
+                (
+                    // We always need to add 1 to the lower bound in order to
+                    // take into account the buffered item.
+                    min + 1,
+                    // When the upper bound of `self.inner` is tight, we will
+                    // need to add 1 to the upper bound, taking account the
+                    // buffered item.
+                    max.map(|max| max + 1),
+                )
             }
         }
-        (min, max)
     }
 }
 
@@ -732,27 +734,15 @@ impl<'a, T, C: Comparator<T, T>> Iterator for MultiWayUnion<'a, T, C> {
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
-        let bounds: Vec<_> = self.tt.iter().map(|it| it.size_hint()).collect();
-
-        // Full overlap.
-        let rmin = *bounds.iter().map(|(a, _)| a).min().unwrap();
-
-        // No overlap.
-        fn checked_add_sum(
-            maxes: impl IntoIterator<Item = Option<usize>>,
-        ) -> Option<usize> {
-            let mut sum = 0usize;
-            for e in maxes.into_iter() {
-                match e {
-                    None => return None,
-                    Some(value) => sum = sum.checked_add(value)?,
-                }
-            }
-            Some(sum)
-        }
-
-        let rmax = checked_add_sum(bounds.iter().map(|(_, b)| b).copied());
-        (rmin, rmax)
+        self.tt.iter().fold((0, Some(0)), |(cmin, cmax), it| {
+            let (imin, imax) = it.size_hint();
+            // Full overlap.
+            let cmin = cmp::max(cmin, imin);
+            // No overlap.
+            let cmax = cmax
+                .and_then(|cmax| imax.and_then(|imax| cmax.checked_add(imax)));
+            (cmin, cmax)
+        })
     }
 
     fn nth(&mut self, mut n: usize) -> Option<Self::Item> {
@@ -1027,8 +1017,6 @@ impl<'a, T, C: Comparator<T, T>> Iterator for MultiWayIntersection<'a, T, C> {
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
-        use std::cmp;
-
         if self.exhausted {
             (0, Some(0))
         } else {
@@ -1036,20 +1024,15 @@ impl<'a, T, C: Comparator<T, T>> Iterator for MultiWayIntersection<'a, T, C> {
             let rmin = 0usize;
 
             // Full overlap.
-            fn take_max(
-                maxes: impl IntoIterator<Item = Option<usize>>,
-            ) -> Option<usize> {
-                let mut max = 0usize;
-                for e in maxes.into_iter() {
-                    match e {
-                        None => return None,
-                        Some(value) => max = cmp::max(max, value),
-                    }
-                }
-                Some(max)
-            }
-
-            let rmax = take_max(self.iters.iter().map(|it| it.size_hint().1));
+            let rmax = self.iters.iter().fold(None, |max_opt, it| {
+                let (_, imax_opt) = it.size_hint();
+                // When current accumulator `max_opt` is `None` (infinity),
+                // return `imax_opt`. Otherwise, take the min of `imax_opt` and
+                // `max_opt`.
+                max_opt.map_or(imax_opt, |max| {
+                    Some(imax_opt.map_or(max, |imax| cmp::min(max, imax)))
+                })
+            });
             (rmin, rmax)
         }
     }

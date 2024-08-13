@@ -80,10 +80,8 @@ where
         // Full overlap.
         let rmin = cmp::max(min1, min2);
         // No overlap.
-        let rmax = match (max1, max2) {
-            (Some(max1), Some(max2)) => max1.checked_add(max2),
-            _ => None,
-        };
+        let rmax =
+            max1.and_then(|max1| max2.and_then(|max2| max1.checked_add(max2)));
         (rmin, rmax)
     }
 }
@@ -178,10 +176,8 @@ where
         // No overlap.
         let rmin = 0;
         // Full overlap.
-        let rmax = match (max1, max2) {
-            (Some(max1), Some(max2)) => Some(cmp::min(max1, max2)),
-            _ => None,
-        };
+        let rmax = max1
+            .and_then(|max1| max2.and_then(|max2| Some(cmp::min(max1, max2))));
         (rmin, rmax)
     }
 }
