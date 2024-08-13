@@ -4,3 +4,13 @@ version = "0.1.2"
 edition = "2021"
 
 [dependencies]
+
+[dev-dependencies]
+rand = "0.8.5"
+rand_chacha = "0.3.1"
+criterion = "0.5"
+
+[[bench]]
+name = "multiway_union_binary_heap"
+harness = false
+test = true
