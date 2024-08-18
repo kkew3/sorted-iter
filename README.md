@@ -23,6 +23,7 @@ In `Cargo.toml`, under `[dependencies]` section,
 
 ```toml
 sorted-iter = { git = "https://github.com/kkew3/sorted-iter.git" }
+compare = "0.1"
 ```
 
 ## Tutorial
