@@ -1,5 +1,6 @@
 use crate::box_iterator;
-use compare::Compare;
+use binary_heap_plus::BinaryHeap;
+use compare::{Compare, Rev};
 use std::cmp::{self, Ordering};
 use std::iter::Peekable;
 use std::marker::PhantomData;
@@ -869,6 +870,301 @@ mod multi_way_union_tests {
             vec![(0, 'j'), (2, 'k'), (3, 'l'), (5, 'm'), (7, 'n'), (8, 'o')]
                 .into_iter();
         let mut u = MultiWayUnion::new([a, b, c], FirstComparator).into_boxed();
+        assert_eq!(u.nth(4), Some(vec![None, Some((4, 'g')), None]));
+        assert_eq!(
+            u.nth(0),
+            Some(vec![Some((5, 'c')), Some((5, 'h')), Some((5, 'm'))])
+        );
+        assert_eq!(u.nth(5), None);
+    }
+}
+
+struct Count {
+    n: usize,
+}
+
+impl Count {
+    fn new() -> Self {
+        Self { n: 0 }
+    }
+}
+
+impl Iterator for Count {
+    type Item = usize;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let n = self.n;
+        self.n += 1;
+        Some(n)
+    }
+}
+
+/// Visits the values representing the union of `K>0` *strictly* sorted
+/// iterators, comparing with `compare`. Yields `Vec<Option<T>>` of length `K`.
+///
+/// Usage example:
+///
+/// ```
+/// use sorted_iter::MultiWayUnionH;
+///
+/// fn using_multi_way_union() {
+///     let v1 = vec![3, 5];
+///     let v2 = vec![2, 3];
+///     let v3 = vec![2, 3, 5];
+///     let mut um = MultiWayUnionH::new(
+///         [v1.into_iter(), v2.into_iter(), v3.into_iter()],
+///         compare::natural(),
+///     );
+///     assert_eq!(um.next(), Some(vec![None, Some(2), Some(2)]));
+///     assert_eq!(um.next(), Some(vec![Some(3), Some(3), Some(3)]));
+///     assert_eq!(um.next(), Some(vec![Some(5), None, Some(5)]));
+///     assert_eq!(um.next(), None);
+/// }
+/// ```
+pub struct MultiWayUnionH<'a, T, C: Compare<T, T>> {
+    bh: BinaryHeap<
+        IndexedPeekedIterator<Box<dyn Iterator<Item = T> + 'a>>,
+        Rev<IndexedPeekedIteratorComparator<T, C>>,
+    >,
+    /// A copy of the inner comparator used in the heap. This would be
+    /// unnecessary if we were able to access the comparator of the heap.
+    inner_comparator: C,
+}
+
+impl<'a, T: 'a, C: Compare<T, T> + Clone + 'a> MultiWayUnionH<'a, T, C> {
+    /// Construct new instance from homogeneous collection of iterators. There
+    /// should be at least one iterator.
+    pub fn new<I: Iterator<Item = T> + 'a>(
+        iters: impl IntoIterator<Item = I>,
+        compare: C,
+    ) -> Self {
+        Self::from_boxed(iters.into_iter().map(box_iterator), compare)
+    }
+
+    /// Construct new instance from collection of boxed iterators. There should
+    /// be at least one iterator.
+    pub fn from_boxed(
+        iters: impl IntoIterator<Item = Box<dyn Iterator<Item = T> + 'a>>,
+        compare: C,
+    ) -> Self {
+        let iters: Vec<_> = iters
+            .into_iter()
+            .zip(Count::new())
+            .map(|(it, n)| IndexedPeekedIterator::new(it, n))
+            .collect();
+        assert!(!iters.is_empty());
+        // Was written as `let comparator = IndexedPeekedIteratorComparator::from(compare).rev()`.
+        // Changed due to compiler's suggestion.
+        let comparator = <IndexedPeekedIteratorComparator<T, C> as Compare<
+            IndexedPeekedIterator<Box<dyn Iterator<Item = T>>>,
+        >>::rev(IndexedPeekedIteratorComparator::from(
+            compare.clone(),
+        ));
+        let bh = BinaryHeap::from_vec_cmp(iters, comparator);
+        Self {
+            bh,
+            inner_comparator: compare,
+        }
+    }
+
+    pub fn into_boxed(self) -> Box<dyn Iterator<Item = Vec<Option<T>>> + 'a> {
+        Box::new(self)
+    }
+}
+
+impl<'a, T, C: Compare<T, T>> MultiWayUnionH<'a, T, C> {
+    /// Initialize the output vec of `Iterator::next()`.
+    #[inline]
+    fn init_next_output(&self) -> Vec<Option<T>> {
+        // Why not use `vec![None; self.tt.len()]`: T is not Clone.
+        (0..self.bh.len()).map(|_| None).collect()
+    }
+
+    /// Isolate `self.bh.peek_mut` inside a function to prevent the mutable
+    /// reference from being leaked.
+    #[inline]
+    fn peek_mut_next(&mut self) -> Option<(T, usize)> {
+        self.bh.peek_mut().unwrap().next()
+    }
+
+    /// Pop from the heap all elements whose value is equal to `value`, and
+    /// collect them if the output vec (`out`) is provided. When `out` is not
+    /// `None`, it should already be initialized to contain `self.bh.len()`
+    /// elements. `out` is guaranteed to contain at least one element `value`
+    /// at index `index` if it's not `None`.
+    fn pop_equal_value_and_collect(
+        &mut self,
+        value: T,
+        index: usize,
+        mut out: Option<&mut Vec<Option<T>>>,
+    ) {
+        // Loop and pop until the top element in the heap is not equal to
+        // `value`. The equality is decided by `self.inner_comparator`.
+        while self
+            .bh
+            .peek()
+            .unwrap()
+            .peek()
+            .filter(|(value_to_pop, _)| {
+                self.inner_comparator.compares_eq(value_to_pop, &value)
+            })
+            .is_some()
+        {
+            let (value_to_pop, index_to_pop) = self.peek_mut_next().unwrap();
+            if let Some(ref mut v) = out {
+                v.get_mut(index_to_pop).unwrap().get_or_insert(value_to_pop);
+            }
+        }
+        if let Some(ref mut v) = out {
+            v.get_mut(index).unwrap().get_or_insert(value);
+        }
+    }
+}
+
+impl<'a, T, C: Compare<T, T>> Iterator for MultiWayUnionH<'a, T, C> {
+    type Item = Vec<Option<T>>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self.peek_mut_next() {
+            None => None,
+            Some((value, index)) => {
+                let mut v = self.init_next_output();
+                self.pop_equal_value_and_collect(value, index, Some(&mut v));
+                Some(v)
+            }
+        }
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.bh.iter().fold((0, Some(0)), |(cmin, cmax), it| {
+            let (imin, imax) = it.size_hint();
+            // Full overlap.
+            let cmin = cmp::max(cmin, imin);
+            // No overlap.
+            let cmax = cmax
+                .and_then(|cmax| imax.and_then(|imax| cmax.checked_add(imax)));
+            (cmin, cmax)
+        })
+    }
+
+    fn nth(&mut self, mut n: usize) -> Option<Self::Item> {
+        // Similar to `next()`, but don't allocate memory for return in the
+        // first n-1 rounds.
+        loop {
+            match self.peek_mut_next() {
+                None => break None,
+                Some((value, index)) => {
+                    if n == 0 {
+                        let mut v = self.init_next_output();
+                        self.pop_equal_value_and_collect(
+                            value,
+                            index,
+                            Some(&mut v),
+                        );
+                        break Some(v);
+                    } else {
+                        self.pop_equal_value_and_collect(value, index, None);
+                        n -= 1;
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod multiway_union_h_tests {
+    use super::MultiWayUnionH;
+    use compare::Compare;
+    use std::cmp::Ordering;
+
+    macro_rules! assert_size_hint {
+        ($itr:ident, $lb:expr, $ub:expr) => {{
+            let (min, max) = $itr.size_hint();
+            assert!(min <= $lb);
+            match (max, $ub) {
+                (Some(max), Some(ub)) => assert!(max >= ub),
+                (Some(max), None) => panic!("ub `{}` is not inf", max),
+                (None, Some(_)) => panic!("ub `inf` is too loose"),
+                (None, None) => (),
+            }
+        }};
+    }
+
+    #[derive(Copy, Clone)]
+    struct FirstComparator;
+
+    impl Compare<(i32, char), (i32, char)> for FirstComparator {
+        fn compare(&self, u: &(i32, char), v: &(i32, char)) -> Ordering {
+            u.0.cmp(&v.0)
+        }
+    }
+
+    #[test]
+    fn test_multi_way_union_iterator() {
+        let a = vec![(1, 'a'), (3, 'b'), (5, 'c'), (6, 'd')].into_iter();
+        let b =
+            vec![(0, 'e'), (1, 'f'), (4, 'g'), (5, 'h'), (7, 'i')].into_iter();
+        let c =
+            vec![(0, 'j'), (2, 'k'), (3, 'l'), (5, 'm'), (7, 'n'), (8, 'o')]
+                .into_iter();
+        let mut u =
+            MultiWayUnionH::new([a, b, c], FirstComparator).into_boxed();
+        assert_size_hint!(u, 9, Some(9));
+        assert_eq!(u.next(), Some(vec![None, Some((0, 'e')), Some((0, 'j'))]));
+        assert_size_hint!(u, 8, Some(8));
+        assert_eq!(u.next(), Some(vec![Some((1, 'a')), Some((1, 'f')), None]));
+        assert_size_hint!(u, 7, Some(7));
+        assert_eq!(u.next(), Some(vec![None, None, Some((2, 'k'))]));
+        assert_size_hint!(u, 6, Some(6));
+        assert_eq!(u.next(), Some(vec![Some((3, 'b')), None, Some((3, 'l'))]));
+        assert_size_hint!(u, 5, Some(5));
+        assert_eq!(u.next(), Some(vec![None, Some((4, 'g')), None]));
+        assert_size_hint!(u, 4, Some(4));
+        assert_eq!(
+            u.next(),
+            Some(vec![Some((5, 'c')), Some((5, 'h')), Some((5, 'm'))])
+        );
+        assert_size_hint!(u, 3, Some(3));
+        assert_eq!(u.next(), Some(vec![Some((6, 'd')), None, None]));
+        assert_size_hint!(u, 2, Some(2));
+        assert_eq!(u.next(), Some(vec![None, Some((7, 'i')), Some((7, 'n'))]));
+        assert_size_hint!(u, 1, Some(1));
+        assert_eq!(u.next(), Some(vec![None, None, Some((8, 'o'))]));
+        assert_size_hint!(u, 0, Some(0));
+        assert_eq!(u.next(), None);
+        assert_size_hint!(u, 0, Some(0));
+        assert_eq!(u.next(), None);
+    }
+
+    #[test]
+    fn test_multi_way_union_iterator_single() {
+        let a = vec![(1, 'a'), (3, 'b'), (5, 'c'), (6, 'd')].into_iter();
+        let mut u = MultiWayUnionH::new([a], FirstComparator).into_boxed();
+        assert_size_hint!(u, 4, Some(4));
+        assert_eq!(u.next(), Some(vec![Some((1, 'a'))]));
+        assert_size_hint!(u, 3, Some(3));
+        assert_eq!(u.next(), Some(vec![Some((3, 'b'))]));
+        assert_size_hint!(u, 2, Some(2));
+        assert_eq!(u.next(), Some(vec![Some((5, 'c'))]));
+        assert_size_hint!(u, 1, Some(1));
+        assert_eq!(u.next(), Some(vec![Some((6, 'd'))]));
+        assert_size_hint!(u, 0, Some(0));
+        assert_eq!(u.next(), None);
+        assert_size_hint!(u, 0, Some(0));
+        assert_eq!(u.next(), None);
+    }
+
+    #[test]
+    fn test_multi_way_union_nth() {
+        let a = vec![(1, 'a'), (3, 'b'), (5, 'c'), (6, 'd')].into_iter();
+        let b =
+            vec![(0, 'e'), (1, 'f'), (4, 'g'), (5, 'h'), (7, 'i')].into_iter();
+        let c =
+            vec![(0, 'j'), (2, 'k'), (3, 'l'), (5, 'm'), (7, 'n'), (8, 'o')]
+                .into_iter();
+        let mut u =
+            MultiWayUnionH::new([a, b, c], FirstComparator).into_boxed();
         assert_eq!(u.nth(4), Some(vec![None, Some((4, 'g')), None]));
         assert_eq!(
             u.nth(0),
