@@ -1,6 +1,6 @@
 //! Heavily inspired by https://github.com/rklaehn/sorted-iter.
 
-use super::Comparator;
+use compare::Compare;
 use std::cmp::{self, Ordering};
 use std::iter::Peekable;
 
@@ -11,7 +11,6 @@ use std::iter::Peekable;
 ///
 /// ```
 /// use sorted_iter::Union;
-/// use sorted_iter::comparators::NaturalComparator;
 ///
 /// fn using_union() {
 ///     let v1 = vec![3, 5];
@@ -19,7 +18,7 @@ use std::iter::Peekable;
 ///     let mut um = Union::new(
 ///         v1.into_iter(),
 ///         v2.into_iter(),
-///         NaturalComparator::new(),
+///         compare::natural(),
 ///     );
 ///     assert_eq!(um.next(), Some((None, Some(2))));
 ///     assert_eq!(um.next(), Some((Some(3), Some(3))));
@@ -31,7 +30,7 @@ pub struct Union<I, J, C>
 where
     I: Iterator,
     J: Iterator,
-    C: Comparator<I::Item, J::Item>,
+    C: Compare<I::Item, J::Item>,
 {
     iter1: Peekable<I>,
     iter2: Peekable<J>,
@@ -42,7 +41,7 @@ impl<I, J, C> Union<I, J, C>
 where
     I: Iterator,
     J: Iterator,
-    C: Comparator<I::Item, J::Item>,
+    C: Compare<I::Item, J::Item>,
 {
     pub fn new(iter1: I, iter2: J, compare: C) -> Self {
         Self {
@@ -57,7 +56,7 @@ impl<I, J, C> Iterator for Union<I, J, C>
 where
     I: Iterator,
     J: Iterator,
-    C: Comparator<I::Item, J::Item>,
+    C: Compare<I::Item, J::Item>,
 {
     type Item = (Option<I::Item>, Option<J::Item>);
 
@@ -90,7 +89,7 @@ impl<'a, I, J, C> Union<I, J, C>
 where
     I: Iterator + 'a,
     J: Iterator + 'a,
-    C: Comparator<I::Item, J::Item> + 'a,
+    C: Compare<I::Item, J::Item> + 'a,
 {
     pub fn into_boxed(
         self,
@@ -106,7 +105,6 @@ where
 ///
 /// ```
 /// use sorted_iter::Intersection;
-/// use sorted_iter::comparators::NaturalComparator;
 ///
 /// fn using_intersection() {
 ///     let v1 = vec![3, 5];
@@ -114,7 +112,7 @@ where
 ///     let mut um = Intersection::new(
 ///         v1.into_iter(),
 ///         v2.into_iter(),
-///         NaturalComparator::new(),
+///         compare::natural(),
 ///     );
 ///     assert_eq!(um.next(), Some((3, 3)));
 ///     assert_eq!(um.next(), None);
@@ -124,7 +122,7 @@ pub struct Intersection<I, J, C>
 where
     I: Iterator,
     J: Iterator,
-    C: Comparator<I::Item, J::Item>,
+    C: Compare<I::Item, J::Item>,
 {
     iter1: I,
     iter2: Peekable<J>,
@@ -135,7 +133,7 @@ impl<I, J, C> Intersection<I, J, C>
 where
     I: Iterator,
     J: Iterator,
-    C: Comparator<I::Item, J::Item>,
+    C: Compare<I::Item, J::Item>,
 {
     pub fn new(iter1: I, iter2: J, compare: C) -> Self {
         Self {
@@ -150,7 +148,7 @@ impl<I, J, C> Iterator for Intersection<I, J, C>
 where
     I: Iterator,
     J: Iterator,
-    C: Comparator<I::Item, J::Item>,
+    C: Compare<I::Item, J::Item>,
 {
     type Item = (I::Item, J::Item);
 
@@ -186,7 +184,7 @@ impl<'a, I, J, C> Intersection<I, J, C>
 where
     I: Iterator + 'a,
     J: Iterator + 'a,
-    C: Comparator<I::Item, J::Item> + 'a,
+    C: Compare<I::Item, J::Item> + 'a,
 {
     pub fn into_boxed(
         self,
@@ -205,7 +203,6 @@ where
 ///
 /// ```
 /// use sorted_iter::Difference;
-/// use sorted_iter::comparators::NaturalComparator;
 ///
 /// fn using_difference() {
 ///     let v1 = vec![3, 5];
@@ -213,7 +210,7 @@ where
 ///     let mut um = Difference::new(
 ///         v1.into_iter(),
 ///         v2.into_iter(),
-///         NaturalComparator::new(),
+///         compare::natural(),
 ///     );
 ///     assert_eq!(um.next(), Some((3, Some(3))));
 ///     assert_eq!(um.next(), Some((5, None)));
@@ -224,7 +221,7 @@ pub struct Difference<I, J, C>
 where
     I: Iterator,
     J: Iterator,
-    C: Comparator<I::Item, J::Item>,
+    C: Compare<I::Item, J::Item>,
 {
     iter1: I,
     iter2: Peekable<J>,
@@ -235,7 +232,7 @@ impl<I, J, C> Difference<I, J, C>
 where
     I: Iterator,
     J: Iterator,
-    C: Comparator<I::Item, J::Item>,
+    C: Compare<I::Item, J::Item>,
 {
     pub fn new(iter1: I, iter2: J, compare: C) -> Self {
         Self {
@@ -250,7 +247,7 @@ impl<I, J, C> Iterator for Difference<I, J, C>
 where
     I: Iterator,
     J: Iterator,
-    C: Comparator<I::Item, J::Item>,
+    C: Compare<I::Item, J::Item>,
 {
     type Item = (I::Item, Option<J::Item>);
 
@@ -280,7 +277,7 @@ impl<'a, I, J, C> Difference<I, J, C>
 where
     I: Iterator + 'a,
     J: Iterator + 'a,
-    C: Comparator<I::Item, J::Item> + 'a,
+    C: Compare<I::Item, J::Item> + 'a,
 {
     pub fn into_boxed(
         self,
@@ -291,7 +288,8 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::{Comparator, Difference, Intersection, Union};
+    use crate::{Difference, Intersection, Union};
+    use compare::Compare;
     use std::cmp::Ordering;
 
     #[derive(Debug, Eq, PartialEq)]
@@ -348,7 +346,7 @@ mod tests {
 
     struct ComparatorOnKey;
 
-    impl Comparator<KeyValue, KeyValue> for ComparatorOnKey {
+    impl Compare<KeyValue, KeyValue> for ComparatorOnKey {
         fn compare(&self, u: &KeyValue, v: &KeyValue) -> Ordering {
             u.key.cmp(&v.key)
         }

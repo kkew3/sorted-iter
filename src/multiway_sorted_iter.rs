@@ -1,4 +1,5 @@
-use crate::{box_iterator, Comparator};
+use crate::box_iterator;
+use compare::Compare;
 use std::cmp::{self, Ordering};
 use std::iter::Peekable;
 use std::marker::PhantomData;
@@ -134,12 +135,12 @@ mod indexed_peeked_iterator_tests {
     }
 }
 
-struct IndexedPeekedIteratorComparator<T, C: Comparator<T, T>> {
+struct IndexedPeekedIteratorComparator<T, C: Compare<T, T>> {
     inner: C,
     phantom: PhantomData<T>,
 }
 
-impl<T, C: Comparator<T, T>> From<C> for IndexedPeekedIteratorComparator<T, C> {
+impl<T, C: Compare<T, T>> From<C> for IndexedPeekedIteratorComparator<T, C> {
     fn from(value: C) -> Self {
         Self {
             inner: value,
@@ -148,8 +149,8 @@ impl<T, C: Comparator<T, T>> From<C> for IndexedPeekedIteratorComparator<T, C> {
     }
 }
 
-impl<I: Iterator, C: Comparator<I::Item, I::Item>>
-    Comparator<IndexedPeekedIterator<I>, IndexedPeekedIterator<I>>
+impl<I: Iterator, C: Compare<I::Item, I::Item>>
+    Compare<IndexedPeekedIterator<I>, IndexedPeekedIterator<I>>
     for IndexedPeekedIteratorComparator<I::Item, C>
 {
     fn compare(
@@ -205,7 +206,6 @@ impl<T> Iterator for NoneIter<T> {
 ///
 /// ```
 /// use sorted_iter::MultiWayUnion;
-/// use sorted_iter::comparators::NaturalComparator;
 ///
 /// fn using_multi_way_union() {
 ///     let v1 = vec![3, 5];
@@ -213,7 +213,7 @@ impl<T> Iterator for NoneIter<T> {
 ///     let v3 = vec![2, 3, 5];
 ///     let mut um = MultiWayUnion::new(
 ///         [v1.into_iter(), v2.into_iter(), v3.into_iter()],
-///         NaturalComparator::new(),
+///         compare::natural(),
 ///     );
 ///     assert_eq!(um.next(), Some(vec![None, Some(2), Some(2)]));
 ///     assert_eq!(um.next(), Some(vec![Some(3), Some(3), Some(3)]));
@@ -221,7 +221,7 @@ impl<T> Iterator for NoneIter<T> {
 ///     assert_eq!(um.next(), None);
 /// }
 /// ```
-pub struct MultiWayUnion<'a, T, C: Comparator<T, T>> {
+pub struct MultiWayUnion<'a, T, C: Compare<T, T>> {
     /// The tournament tree (loser tree).
     tt: Vec<IndexedPeekedIterator<Box<dyn Iterator<Item = T> + 'a>>>,
     len: usize,
@@ -229,7 +229,7 @@ pub struct MultiWayUnion<'a, T, C: Comparator<T, T>> {
 }
 
 /// Initialize the tournament tree. The len of `iters` should be a power of 2.
-fn init_tt<'a, T, C: Comparator<T, T>>(
+fn init_tt<'a, T, C: Compare<T, T>>(
     iters: Vec<IndexedPeekedIterator<Box<dyn Iterator<Item = T> + 'a>>>,
     compare: &IndexedPeekedIteratorComparator<T, C>,
 ) -> Vec<IndexedPeekedIterator<Box<dyn Iterator<Item = T> + 'a>>> {
@@ -322,7 +322,7 @@ fn init_tt<'a, T, C: Comparator<T, T>>(
 }
 
 /// Pop from the tournament tree, and find the next winner.
-fn pop_and_find_next_tt<T, C: Comparator<T, T>>(
+fn pop_and_find_next_tt<T, C: Compare<T, T>>(
     tt: &mut [IndexedPeekedIterator<Box<dyn Iterator<Item = T> + '_>>],
     compare: &IndexedPeekedIteratorComparator<T, C>,
 ) -> Option<(T, usize)> {
@@ -356,7 +356,6 @@ mod tournament_tree_tests {
         init_tt, pop_and_find_next_tt, IndexedPeekedIterator,
         IndexedPeekedIteratorComparator,
     };
-    use crate::comparators::NaturalComparator;
 
     macro_rules! new_indexed_peeked_itr {
         ($idx:literal) => {
@@ -407,8 +406,7 @@ mod tournament_tree_tests {
     #[test]
     fn test_init_tt_1() {
         let iters = new_iters1();
-        let compare =
-            IndexedPeekedIteratorComparator::from(NaturalComparator::new());
+        let compare = IndexedPeekedIteratorComparator::from(compare::natural());
         let tt = init_tt(iters, &compare);
         let peeks: Vec<_> = tt.iter().map(|it| it.peek()).collect();
         assert_eq!(
@@ -429,8 +427,7 @@ mod tournament_tree_tests {
     #[test]
     fn test_init_tt_2() {
         let iters = new_iters2();
-        let compare =
-            IndexedPeekedIteratorComparator::from(NaturalComparator::new());
+        let compare = IndexedPeekedIteratorComparator::from(compare::natural());
         let tt = init_tt(iters, &compare);
         let peeks: Vec<_> = tt.iter().map(|it| it.peek()).collect();
         assert_eq!(
@@ -442,8 +439,7 @@ mod tournament_tree_tests {
     #[test]
     fn test_init_tt_3() {
         let iters = new_iters3();
-        let compare =
-            IndexedPeekedIteratorComparator::from(NaturalComparator::new());
+        let compare = IndexedPeekedIteratorComparator::from(compare::natural());
         let tt = init_tt(iters, &compare);
         let peeks: Vec<_> = tt.iter().map(|it| it.peek()).collect();
         assert_eq!(peeks, vec![Some(&(2, 0))]);
@@ -452,8 +448,7 @@ mod tournament_tree_tests {
     #[test]
     fn test_pop_and_find_next_tt_1() {
         let iters = new_iters1();
-        let compare =
-            IndexedPeekedIteratorComparator::from(NaturalComparator::new());
+        let compare = IndexedPeekedIteratorComparator::from(compare::natural());
         let mut tt = init_tt(iters, &compare);
 
         let popped = pop_and_find_next_tt(&mut tt, &compare);
@@ -529,8 +524,7 @@ mod tournament_tree_tests {
     #[test]
     fn test_pop_and_find_next_tt_2() {
         let iters = new_iters2();
-        let compare =
-            IndexedPeekedIteratorComparator::from(NaturalComparator::new());
+        let compare = IndexedPeekedIteratorComparator::from(compare::natural());
         let mut tt = init_tt(iters, &compare);
 
         let popped = pop_and_find_next_tt(&mut tt, &compare);
@@ -597,8 +591,7 @@ mod tournament_tree_tests {
     #[test]
     fn test_pop_and_find_next_tt_3() {
         let iters = new_iters3();
-        let compare =
-            IndexedPeekedIteratorComparator::from(NaturalComparator::new());
+        let compare = IndexedPeekedIteratorComparator::from(compare::natural());
         let mut tt = init_tt(iters, &compare);
 
         let popped = pop_and_find_next_tt(&mut tt, &compare);
@@ -623,7 +616,7 @@ mod tournament_tree_tests {
     }
 }
 
-impl<'a, T: 'a, C: Comparator<T, T> + 'a> MultiWayUnion<'a, T, C> {
+impl<'a, T: 'a, C: Compare<T, T> + 'a> MultiWayUnion<'a, T, C> {
     /// Construct new instance from homogeneous collection of iterators. There
     /// should be at least one iterator.
     pub fn new<I: Iterator<Item = T> + 'a>(
@@ -671,7 +664,7 @@ impl<'a, T: 'a, C: Comparator<T, T> + 'a> MultiWayUnion<'a, T, C> {
 /// (`out`) is provided. When `out` is provided, it should already be
 /// initialized. If `out` is provided, it's guaranteed that after the call, it
 /// will contain at least one element `value` at index `index`.
-fn find_equal_value_and_collect<T, C: Comparator<T, T>>(
+fn find_equal_value_and_collect<T, C: Compare<T, T>>(
     tt: &mut [IndexedPeekedIterator<Box<dyn Iterator<Item = T> + '_>>],
     value: T,
     index: usize,
@@ -716,7 +709,7 @@ fn find_equal_value_and_collect<T, C: Comparator<T, T>>(
     }
 }
 
-impl<'a, T, C: Comparator<T, T>> Iterator for MultiWayUnion<'a, T, C> {
+impl<'a, T, C: Compare<T, T>> Iterator for MultiWayUnion<'a, T, C> {
     type Item = Vec<Option<T>>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -789,7 +782,7 @@ impl<'a, T, C: Comparator<T, T>> Iterator for MultiWayUnion<'a, T, C> {
 #[cfg(test)]
 mod multi_way_union_tests {
     use super::MultiWayUnion;
-    use crate::Comparator;
+    use compare::Compare;
     use std::cmp::Ordering;
 
     macro_rules! assert_size_hint {
@@ -807,7 +800,7 @@ mod multi_way_union_tests {
 
     struct FirstComparator;
 
-    impl Comparator<(i32, char), (i32, char)> for FirstComparator {
+    impl Compare<(i32, char), (i32, char)> for FirstComparator {
         fn compare(&self, u: &(i32, char), v: &(i32, char)) -> Ordering {
             u.0.cmp(&v.0)
         }
@@ -892,7 +885,6 @@ mod multi_way_union_tests {
 ///
 /// ```
 /// use sorted_iter::MultiWayIntersection;
-/// use sorted_iter::comparators::NaturalComparator;
 ///
 /// fn using_multi_way_union() {
 ///     let v1 = vec![3, 5];
@@ -900,19 +892,19 @@ mod multi_way_union_tests {
 ///     let v3 = vec![2, 3, 5];
 ///     let mut um = MultiWayIntersection::new(
 ///         [v1.into_iter(), v2.into_iter(), v3.into_iter()],
-///         NaturalComparator::new(),
+///         compare::natural(),
 ///     );
 ///     assert_eq!(um.next(), Some(vec![3, 3, 3]));
 ///     assert_eq!(um.next(), None);
 /// }
 /// ```
-pub struct MultiWayIntersection<'a, T, C: Comparator<T, T>> {
+pub struct MultiWayIntersection<'a, T, C: Compare<T, T>> {
     iters: Vec<Peekable<Box<dyn Iterator<Item = T> + 'a>>>,
     compare: C,
     exhausted: bool,
 }
 
-impl<'a, T: 'a, C: Comparator<T, T> + 'a> MultiWayIntersection<'a, T, C> {
+impl<'a, T: 'a, C: Compare<T, T> + 'a> MultiWayIntersection<'a, T, C> {
     /// Construct new instance from homogeneous collection of iterators. There
     /// should be at least one iterator.
     pub fn new<I: Iterator<Item = T> + 'a>(
@@ -956,7 +948,7 @@ enum MultiWayIntersectionState {
 /// immediately. Otherwise, return `NotIntersection` or `Ok` accordingly. If
 /// the output vec `out` is provided initialized, it will be populated when
 /// `Ok` is to be returned.
-fn step_iters_until_as_large_as_value_and_collect<T, C: Comparator<T, T>>(
+fn step_iters_until_as_large_as_value_and_collect<T, C: Compare<T, T>>(
     iters: &mut [Peekable<Box<dyn Iterator<Item = T> + '_>>],
     compare: &C,
     value: T,
@@ -991,7 +983,7 @@ fn step_iters_until_as_large_as_value_and_collect<T, C: Comparator<T, T>>(
     }
 }
 
-impl<'a, T, C: Comparator<T, T>> Iterator for MultiWayIntersection<'a, T, C> {
+impl<'a, T, C: Compare<T, T>> Iterator for MultiWayIntersection<'a, T, C> {
     type Item = Vec<T>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -1083,7 +1075,7 @@ impl<'a, T, C: Comparator<T, T>> Iterator for MultiWayIntersection<'a, T, C> {
 #[cfg(test)]
 mod multi_way_intersection_tests {
     use super::MultiWayIntersection;
-    use crate::Comparator;
+    use compare::Compare;
     use std::cmp::Ordering;
 
     macro_rules! assert_size_hint {
@@ -1101,7 +1093,7 @@ mod multi_way_intersection_tests {
 
     struct FirstComparator;
 
-    impl Comparator<(i32, char), (i32, char)> for FirstComparator {
+    impl Compare<(i32, char), (i32, char)> for FirstComparator {
         fn compare(&self, u: &(i32, char), v: &(i32, char)) -> Ordering {
             u.0.cmp(&v.0)
         }
