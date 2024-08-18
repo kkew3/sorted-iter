@@ -1,16 +1,8 @@
-pub mod comparators;
 mod multiway_sorted_iter;
 mod sorted_iter;
 
 pub use multiway_sorted_iter::{MultiWayIntersection, MultiWayUnion};
 pub use sorted_iter::{Difference, Intersection, Union};
-
-use std::cmp::Ordering;
-
-/// An external comparator of two objects.
-pub trait Comparator<U, V> {
-    fn compare(&self, u: &U, v: &V) -> Ordering;
-}
 
 pub fn box_iterator<'a, I: Iterator + 'a>(
     iter: I,

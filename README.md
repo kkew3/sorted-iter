@@ -17,21 +17,20 @@ This makes a lot of sense if you want to compute the intersection in terms of on
 
 The ordering of the input iterators is assumed, and will be checked neither at compile-time nor during runtime.
 
-The `MultiWayUnion` is backed by a [tournament tree](https://en.wikipedia.org/wiki/K-way_merge_algorithm#Tournament_Tree).
-
 ## Installation
 
 In `Cargo.toml`, under `[dependencies]` section,
 
 ```toml
 sorted-iter = { git = "https://github.com/kkew3/sorted-iter.git" }
+compare = "0.1"
 ```
 
 ## Tutorial
 
 Steps to build an aggregate iterator:
 
-1. Define your own comparator by implementing `sorted_iter::Comparator` trait, or use `sorted_iter::comparators::NaturalComparator` if the input items already implement `Ord`.
+1. Define your own comparator by implementing `compare::Compare` trait, or use `compare::natural()` if the input items already implement `Ord`.
 2. Instantiate an aggregating iterator by calling its `new` associated function. For K-way operation, there's also a `from_boxed` associated function if your iterators are of different types. You may box your iterators using `sorted_iter::box_iterator` function.
 3. Iterate over the instantiated iterator.
 
@@ -41,7 +40,6 @@ Two-way operation:
 
 ```rust
 use sorted_iter::Union;
-use sorted_iter::comparators::NaturalComparator;
 
 fn using_union() {
     let v1 = vec![3, 5];
@@ -49,7 +47,7 @@ fn using_union() {
     let mut um = Union::new(
         v1.into_iter(),
         v2.into_iter(),
-        NaturalComparator::new(),
+        compare::natural(),
     );
     assert_eq!(um.next(), Some((None, Some(2))));
     assert_eq!(um.next(), Some((Some(3), Some(3))));
@@ -62,15 +60,14 @@ K-way operation:
 
 ```rust
 use sorted_iter::MultiWayUnion;
-use sorted_iter::comparators::NaturalComparator;
 
-fn using_multi_way_union() {
+fn using_multiway_union() {
     let v1 = vec![3, 5];
     let v2 = vec![2, 3];
     let v3 = vec![2, 3, 5];
     let mut um = MultiWayUnion::new(
         [v1.into_iter(), v2.into_iter(), v3.into_iter()],
-        NaturalComparator::new(),
+        compare::natural(),
     );
     assert_eq!(um.next(), Some(vec![None, Some(2), Some(2)]));
     assert_eq!(um.next(), Some(vec![Some(3), Some(3), Some(3)]));
