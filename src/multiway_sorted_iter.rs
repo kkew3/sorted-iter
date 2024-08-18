@@ -692,6 +692,17 @@ mod multiway_intersection_tests {
     }
 
     #[test]
+    fn test_multiway_intersection_iterator_one_empty() {
+        let a = vec![(1, 'a'), (3, 'b'), (5, 'c'), (6, 'd')].into_iter();
+        let b = vec![].into_iter();
+        let mut u = MultiWayIntersection::new([a, b], FirstComparator);
+        assert_size_hint!(u, 0, Some(0));
+        assert_eq!(u.next(), None);
+        assert_size_hint!(u, 0, Some(0));
+        assert_eq!(u.next(), None);
+    }
+
+    #[test]
     fn test_multiway_intersection_iterator() {
         let a = vec![
             (1, 'a'),
