@@ -60,7 +60,7 @@ K-way operation:
 ```rust
 use sorted_iter::MultiWayUnion;
 
-fn using_multi_way_union() {
+fn using_multiway_union() {
     let v1 = vec![3, 5];
     let v2 = vec![2, 3];
     let v3 = vec![2, 3, 5];

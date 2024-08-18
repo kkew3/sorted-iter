@@ -4,7 +4,7 @@ use criterion::{
 };
 use rand::prelude::*;
 use rand_chacha::ChaChaRng;
-use sorted_iter::{MultiWayUnion};
+use sorted_iter::MultiWayUnion;
 use std::ops::Range;
 use std::vec::IntoIter;
 

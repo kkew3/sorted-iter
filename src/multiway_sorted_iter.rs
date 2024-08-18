@@ -202,7 +202,7 @@ impl Iterator for Count {
 /// ```
 /// use sorted_iter::MultiWayUnion;
 ///
-/// fn using_multi_way_union() {
+/// fn using_multiway_union() {
 ///     let v1 = vec![3, 5];
 ///     let v2 = vec![2, 3];
 ///     let v3 = vec![2, 3, 5];
@@ -368,8 +368,7 @@ impl<'a, T, C: Compare<T, T>> Iterator for MultiWayUnion<'a, T, C> {
 }
 
 #[cfg(test)]
-mod multiway_union_tests {
-    use super::MultiWayUnion;
+pub mod test_utils {
     use compare::Compare;
     use std::cmp::Ordering;
 
@@ -386,25 +385,32 @@ mod multiway_union_tests {
         }};
     }
 
+    pub(crate) use assert_size_hint;
+
     #[derive(Copy, Clone)]
-    struct FirstComparator;
+    pub struct FirstComparator;
 
     impl Compare<(i32, char), (i32, char)> for FirstComparator {
         fn compare(&self, u: &(i32, char), v: &(i32, char)) -> Ordering {
             u.0.cmp(&v.0)
         }
     }
+}
+
+#[cfg(test)]
+mod multiway_union_tests {
+    use super::test_utils::{assert_size_hint, FirstComparator};
+    use super::MultiWayUnion;
 
     #[test]
-    fn test_multi_way_union_iterator() {
+    fn test_multiway_union_iterator() {
         let a = vec![(1, 'a'), (3, 'b'), (5, 'c'), (6, 'd')].into_iter();
         let b =
             vec![(0, 'e'), (1, 'f'), (4, 'g'), (5, 'h'), (7, 'i')].into_iter();
         let c =
             vec![(0, 'j'), (2, 'k'), (3, 'l'), (5, 'm'), (7, 'n'), (8, 'o')]
                 .into_iter();
-        let mut u =
-            MultiWayUnion::new([a, b, c], FirstComparator).into_boxed();
+        let mut u = MultiWayUnion::new([a, b, c], FirstComparator).into_boxed();
         assert_size_hint!(u, 9, Some(9));
         assert_eq!(u.next(), Some(vec![None, Some((0, 'e')), Some((0, 'j'))]));
         assert_size_hint!(u, 8, Some(8));
@@ -433,7 +439,7 @@ mod multiway_union_tests {
     }
 
     #[test]
-    fn test_multi_way_union_iterator_single() {
+    fn test_multiway_union_iterator_single() {
         let a = vec![(1, 'a'), (3, 'b'), (5, 'c'), (6, 'd')].into_iter();
         let mut u = MultiWayUnion::new([a], FirstComparator).into_boxed();
         assert_size_hint!(u, 4, Some(4));
@@ -451,15 +457,14 @@ mod multiway_union_tests {
     }
 
     #[test]
-    fn test_multi_way_union_nth() {
+    fn test_multiway_union_nth() {
         let a = vec![(1, 'a'), (3, 'b'), (5, 'c'), (6, 'd')].into_iter();
         let b =
             vec![(0, 'e'), (1, 'f'), (4, 'g'), (5, 'h'), (7, 'i')].into_iter();
         let c =
             vec![(0, 'j'), (2, 'k'), (3, 'l'), (5, 'm'), (7, 'n'), (8, 'o')]
                 .into_iter();
-        let mut u =
-            MultiWayUnion::new([a, b, c], FirstComparator).into_boxed();
+        let mut u = MultiWayUnion::new([a, b, c], FirstComparator).into_boxed();
         assert_eq!(u.nth(4), Some(vec![None, Some((4, 'g')), None]));
         assert_eq!(
             u.nth(0),
@@ -477,7 +482,7 @@ mod multiway_union_tests {
 /// ```
 /// use sorted_iter::MultiWayIntersection;
 ///
-/// fn using_multi_way_union() {
+/// fn using_multiway_intersection() {
 ///     let v1 = vec![3, 5];
 ///     let v2 = vec![2, 3];
 ///     let v3 = vec![2, 3, 5];
@@ -664,34 +669,12 @@ impl<'a, T, C: Compare<T, T>> Iterator for MultiWayIntersection<'a, T, C> {
 }
 
 #[cfg(test)]
-mod multi_way_intersection_tests {
+mod multiway_intersection_tests {
+    use super::test_utils::{assert_size_hint, FirstComparator};
     use super::MultiWayIntersection;
-    use compare::Compare;
-    use std::cmp::Ordering;
-
-    macro_rules! assert_size_hint {
-        ($itr:ident, $lb:expr, $ub:expr) => {{
-            let (min, max) = $itr.size_hint();
-            assert!(min <= $lb);
-            match (max, $ub) {
-                (Some(max), Some(ub)) => assert!(max >= ub),
-                (Some(max), None) => panic!("ub `{}` is not inf", max),
-                (None, Some(_)) => panic!("ub `inf` is too loose"),
-                (None, None) => (),
-            }
-        }};
-    }
-
-    struct FirstComparator;
-
-    impl Compare<(i32, char), (i32, char)> for FirstComparator {
-        fn compare(&self, u: &(i32, char), v: &(i32, char)) -> Ordering {
-            u.0.cmp(&v.0)
-        }
-    }
 
     #[test]
-    fn test_multi_way_intersection_iterator_single() {
+    fn test_multiway_intersection_iterator_single() {
         let a = vec![(1, 'a'), (3, 'b'), (5, 'c'), (6, 'd')].into_iter();
         let mut u = MultiWayIntersection::new([a], FirstComparator);
         assert_size_hint!(u, 4, Some(4));
@@ -709,7 +692,7 @@ mod multi_way_intersection_tests {
     }
 
     #[test]
-    fn test_multi_way_intersection_iterator() {
+    fn test_multiway_intersection_iterator() {
         let a = vec![
             (1, 'a'),
             (3, 'b'),
@@ -739,7 +722,7 @@ mod multi_way_intersection_tests {
     }
 
     #[test]
-    fn test_multi_way_intersection_nth() {
+    fn test_multiway_intersection_nth() {
         let a = vec![
             (1, 'a'),
             (3, 'b'),
