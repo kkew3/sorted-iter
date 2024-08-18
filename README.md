@@ -17,8 +17,6 @@ This makes a lot of sense if you want to compute the intersection in terms of on
 
 The ordering of the input iterators is assumed, and will be checked neither at compile-time nor during runtime.
 
-The `MultiWayUnion` is backed by a [tournament tree](https://en.wikipedia.org/wiki/K-way_merge_algorithm#Tournament_Tree).
-
 ## Installation
 
 In `Cargo.toml`, under `[dependencies]` section,

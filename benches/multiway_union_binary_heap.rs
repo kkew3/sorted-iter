@@ -4,7 +4,7 @@ use criterion::{
 };
 use rand::prelude::*;
 use rand_chacha::ChaChaRng;
-use sorted_iter::{MultiWayUnion, MultiWayUnionH};
+use sorted_iter::{MultiWayUnion};
 use std::ops::Range;
 use std::vec::IntoIter;
 
@@ -325,12 +325,8 @@ fn build_bench_case(
         .collect()
 }
 
-fn tt_count(bench_case: Vec<IntoIter<u32>>) {
-    MultiWayUnion::new(bench_case, compare::natural()).count();
-}
-
 fn bh_count(bench_case: Vec<IntoIter<u32>>) {
-    MultiWayUnionH::new(bench_case, compare::natural()).count();
+    MultiWayUnion::new(bench_case, compare::natural()).count();
 }
 
 fn baseline_count(bench_case: Vec<IntoIter<u32>>) {
@@ -341,9 +337,6 @@ fn bench_multiway_union(c: &mut Criterion) {
     let mut group = c.benchmark_group("MultiWayUnion");
     let param_desc = "n_seq=256, delta_range=1..16, len_range=10000..20000";
     let bench_case = build_bench_case(256, 1..16, 10000..20000);
-    group.bench_function(BenchmarkId::new("TT", param_desc), |b| {
-        b.iter(|| tt_count(black_box(bench_case.clone())))
-    });
     group.bench_function(BenchmarkId::new("BH", param_desc), |b| {
         b.iter(|| bh_count(black_box(bench_case.clone())))
     });

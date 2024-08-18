@@ -4,7 +4,6 @@ use compare::{Compare, Rev};
 use std::cmp::{self, Ordering};
 use std::iter::Peekable;
 use std::marker::PhantomData;
-use std::mem::MaybeUninit;
 
 /// Peekable iterator whose `peek()` does not mutate self. Each
 /// `IndexedPeekedIterator` admits an index of type `usize`, which will be
@@ -175,28 +174,23 @@ impl<I: Iterator, C: Compare<I::Item, I::Item>>
     }
 }
 
-/// Used as a sentinel data source.
-struct NoneIter<T> {
-    phantom: PhantomData<T>,
+struct Count {
+    n: usize,
 }
 
-impl<T> NoneIter<T> {
+impl Count {
     fn new() -> Self {
-        Self {
-            phantom: PhantomData::default(),
-        }
+        Self { n: 0 }
     }
 }
 
-impl<T> Iterator for NoneIter<T> {
-    type Item = T;
+impl Iterator for Count {
+    type Item = usize;
 
     fn next(&mut self) -> Option<Self::Item> {
-        None
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        (0, Some(0))
+        let n = self.n;
+        self.n += 1;
+        Some(n)
     }
 }
 
@@ -223,401 +217,16 @@ impl<T> Iterator for NoneIter<T> {
 /// }
 /// ```
 pub struct MultiWayUnion<'a, T, C: Compare<T, T>> {
-    /// The tournament tree (loser tree).
-    tt: Vec<IndexedPeekedIterator<Box<dyn Iterator<Item = T> + 'a>>>,
-    len: usize,
-    compare: IndexedPeekedIteratorComparator<T, C>,
+    bh: BinaryHeap<
+        IndexedPeekedIterator<Box<dyn Iterator<Item = T> + 'a>>,
+        Rev<IndexedPeekedIteratorComparator<T, C>>,
+    >,
+    /// A copy of the inner comparator used in the heap. This would be
+    /// unnecessary if we were able to access the comparator of the heap.
+    inner_comparator: C,
 }
 
-/// Initialize the tournament tree. The len of `iters` should be a power of 2.
-fn init_tt<'a, T, C: Compare<T, T>>(
-    iters: Vec<IndexedPeekedIterator<Box<dyn Iterator<Item = T> + 'a>>>,
-    compare: &IndexedPeekedIteratorComparator<T, C>,
-) -> Vec<IndexedPeekedIterator<Box<dyn Iterator<Item = T> + 'a>>> {
-    let n_iters = iters.len();
-    assert!(n_iters.is_power_of_two());
-    let mut tt: Vec<
-        MaybeUninit<IndexedPeekedIterator<Box<dyn Iterator<Item = T>>>>,
-    > = Vec::with_capacity(2 * n_iters);
-    // Fill the first half with uninitialized values, and the second half with
-    // elements from `iters`.
-    unsafe {
-        let (head, _) = tt.spare_capacity_mut().split_at_mut(n_iters);
-        head.fill_with(|| MaybeUninit::uninit().assume_init());
-        tt.set_len(n_iters);
-    };
-    for item in iters {
-        tt.push(MaybeUninit::new(item));
-    }
-    assert_eq!(tt.len(), 2 * n_iters);
-
-    // The uninitialized first half is initialized here.
-    // For example, denote the uninitialized positions as `_`, and denote
-    // sentinel elements as `.`, the tournament tree `tt` can be written as:
-    // _ _ _ _ _ _ _ _ 7 2 5 8 4 1 . .
-    //                 a b
-    //
-    // _ _ _ _ 7 _ _ _ 2 _ 5 8 4 1 . .
-    //                     a b
-    //
-    // _ _ _ _ 7 8 _ _ 2 5 _ _ 4 1 . .
-    //                         a b
-    //
-    // _ _ _ _ 7 8 4 _ 2 5 1 _ _ _ . .
-    //                             a b
-    //
-    // _ _ _ _ 7 8 4 . 2 5 1 . _ _ _ _
-    //                 a b
-    //
-    // _ _ 5 _ 7 8 4 . 2 _ 1 . _ _ _ _
-    //                     a b
-    //
-    // _ _ 5 . 7 8 4 . 2 1 _ _ _ _ _ _
-    //                 a b
-    //
-    // _ 2 5 . 7 8 4 . 1 _ _ _ _ _ _ _
-    //
-    // 1 2 5 . 7 8 4 . _ _ _ _ _ _ _ _
-    //
-    // The moving range of (a,b) can be bounded by [n_iters, n_iters + p)
-    // for each traversal, and p is exclusively lower bounded by 1.
-
-    /// Swap winner to its position.
-    #[inline]
-    fn swap_winner<T>(winner_idx: usize, n_iters: usize, tt: &mut [T]) {
-        let target_idx = (winner_idx - n_iters) / 2 + n_iters;
-        tt.swap(winner_idx, target_idx);
-    }
-
-    /// Swap loser to its position.
-    #[inline]
-    fn swap_loser<T>(loser_idx: usize, n_iters: usize, p: usize, tt: &mut [T]) {
-        let target_idx = (loser_idx - n_iters + p) / 2;
-        tt.swap(loser_idx, target_idx);
-    }
-
-    let mut p = n_iters;
-    while p > 1 {
-        for i in (n_iters..n_iters + p).filter(|x| x % 2 == 0) {
-            // SAFETY: i < n_iters + p <= tt.len() == 2 * n_iters.
-            let a = unsafe { tt.get_unchecked(i).assume_init_ref() };
-            // SAFETY: i, p and n_iters are even, so i + 1 < n_iters + p.
-            let b = unsafe { tt.get_unchecked(i + 1).assume_init_ref() };
-            let (winner, loser) = match compare.compare(a, b) {
-                // If a <= b, then winner is a, and loser is b.
-                Ordering::Less | Ordering::Equal => (i, i + 1),
-                // If a > b, then winner is b, and loser is a.
-                Ordering::Greater => (i + 1, i),
-            };
-            // The order (loser, and then winner) is important.
-            swap_loser(loser, n_iters, p, &mut tt);
-            swap_winner(winner, n_iters, &mut tt);
-        }
-        p /= 2;
-    }
-    // Swap the output
-    tt.swap(n_iters, 0);
-
-    tt.truncate(n_iters);
-    unsafe { tt.into_iter().map(|e| e.assume_init()).collect() }
-}
-
-/// Pop from the tournament tree, and find the next winner.
-fn pop_and_find_next_tt<T, C: Compare<T, T>>(
-    tt: &mut [IndexedPeekedIterator<Box<dyn Iterator<Item = T> + '_>>],
-    compare: &IndexedPeekedIteratorComparator<T, C>,
-) -> Option<(T, usize)> {
-    assert!(tt.len().is_power_of_two());
-    // SAFETY: tt.len() is a power of 2.
-    match unsafe { tt.get_unchecked_mut(0).next() } {
-        // tt.first is the smallest. If the smallest is None (infinity), then
-        // all the others must also be None.
-        None => None,
-        Some((value, index)) => {
-            let mut i = (index + tt.len()) / 2;
-            while i > 0 {
-                // SAFETY: tt.len() is a power of 2.
-                let a = unsafe { tt.get_unchecked(0) };
-                // SAFETY: index < tt.len(), so i < tt.len().
-                let b = unsafe { tt.get_unchecked(i) };
-                if let Ordering::Greater = compare.compare(a, b) {
-                    // a is loser.
-                    tt.swap(0, i);
-                }
-                i /= 2;
-            }
-            Some((value, index))
-        }
-    }
-}
-
-#[cfg(test)]
-mod tournament_tree_tests {
-    use super::{
-        init_tt, pop_and_find_next_tt, IndexedPeekedIterator,
-        IndexedPeekedIteratorComparator,
-    };
-
-    macro_rules! new_indexed_peeked_itr {
-        ($idx:literal) => {
-            {
-                let it: IndexedPeekedIterator<Box<dyn Iterator<Item = i32>>> =
-                    IndexedPeekedIterator::new(Box::new(vec![].into_iter()), $idx);
-                it
-            }
-        };
-        ($idx:literal; $( $elem:literal ),+) => {
-            {
-                let it: IndexedPeekedIterator<Box<dyn Iterator<Item = i32>>> =
-                    IndexedPeekedIterator::new(Box::new(vec![$( $elem ),+].into_iter()), $idx);
-                it
-            }
-        };
-    }
-
-    fn new_iters1() -> Vec<IndexedPeekedIterator<Box<dyn Iterator<Item = i32>>>>
-    {
-        vec![
-            new_indexed_peeked_itr!(0; 7),
-            new_indexed_peeked_itr!(1; 2),
-            new_indexed_peeked_itr!(2; 2),
-            new_indexed_peeked_itr!(3; 8),
-            new_indexed_peeked_itr!(4; 4),
-            new_indexed_peeked_itr!(5),
-            new_indexed_peeked_itr!(6),
-            new_indexed_peeked_itr!(7),
-        ]
-    }
-
-    fn new_iters2() -> Vec<IndexedPeekedIterator<Box<dyn Iterator<Item = i32>>>>
-    {
-        vec![
-            new_indexed_peeked_itr!(0; 2, 7),
-            new_indexed_peeked_itr!(1; 5, 10),
-            new_indexed_peeked_itr!(2; 3, 6),
-            new_indexed_peeked_itr!(3; 4, 8),
-        ]
-    }
-
-    fn new_iters3() -> Vec<IndexedPeekedIterator<Box<dyn Iterator<Item = i32>>>>
-    {
-        vec![new_indexed_peeked_itr!(0; 2, 4, 5)]
-    }
-
-    #[test]
-    fn test_init_tt_1() {
-        let iters = new_iters1();
-        let compare = IndexedPeekedIteratorComparator::from(compare::natural());
-        let tt = init_tt(iters, &compare);
-        let peeks: Vec<_> = tt.iter().map(|it| it.peek()).collect();
-        assert_eq!(
-            peeks,
-            vec![
-                Some(&(2, 1)),
-                Some(&(4, 4)),
-                Some(&(2, 2)),
-                None,
-                Some(&(7, 0)),
-                Some(&(8, 3)),
-                None,
-                None,
-            ]
-        );
-    }
-
-    #[test]
-    fn test_init_tt_2() {
-        let iters = new_iters2();
-        let compare = IndexedPeekedIteratorComparator::from(compare::natural());
-        let tt = init_tt(iters, &compare);
-        let peeks: Vec<_> = tt.iter().map(|it| it.peek()).collect();
-        assert_eq!(
-            peeks,
-            vec![Some(&(2, 0)), Some(&(3, 2)), Some(&(5, 1)), Some(&(4, 3)),]
-        );
-    }
-
-    #[test]
-    fn test_init_tt_3() {
-        let iters = new_iters3();
-        let compare = IndexedPeekedIteratorComparator::from(compare::natural());
-        let tt = init_tt(iters, &compare);
-        let peeks: Vec<_> = tt.iter().map(|it| it.peek()).collect();
-        assert_eq!(peeks, vec![Some(&(2, 0))]);
-    }
-
-    #[test]
-    fn test_pop_and_find_next_tt_1() {
-        let iters = new_iters1();
-        let compare = IndexedPeekedIteratorComparator::from(compare::natural());
-        let mut tt = init_tt(iters, &compare);
-
-        let popped = pop_and_find_next_tt(&mut tt, &compare);
-        assert_eq!(popped, Some((2, 1)));
-        let peeks: Vec<_> = tt.iter().map(|it| it.peek()).collect();
-        assert_eq!(
-            peeks,
-            vec![
-                Some(&(2, 2)),
-                Some(&(4, 4)),
-                Some(&(7, 0)),
-                None,
-                None,
-                Some(&(8, 3)),
-                None,
-                None,
-            ]
-        );
-
-        let popped = pop_and_find_next_tt(&mut tt, &compare);
-        assert_eq!(popped, Some((2, 2)));
-        let peeks: Vec<_> = tt.iter().map(|it| it.peek()).collect();
-        assert_eq!(
-            peeks,
-            vec![
-                Some(&(4, 4)),
-                Some(&(7, 0)),
-                Some(&(8, 3)),
-                None,
-                None,
-                None,
-                None,
-                None,
-            ]
-        );
-
-        let popped = pop_and_find_next_tt(&mut tt, &compare);
-        assert_eq!(popped, Some((4, 4)));
-        let peeks: Vec<_> = tt.iter().map(|it| it.peek()).collect();
-        assert_eq!(
-            peeks,
-            vec![
-                Some(&(7, 0)),
-                None,
-                Some(&(8, 3)),
-                None,
-                None,
-                None,
-                None,
-                None,
-            ]
-        );
-
-        let popped = pop_and_find_next_tt(&mut tt, &compare);
-        assert_eq!(popped, Some((7, 0)));
-        let peeks: Vec<_> = tt.iter().map(|it| it.peek()).collect();
-        assert_eq!(
-            peeks,
-            vec![Some(&(8, 3)), None, None, None, None, None, None, None]
-        );
-
-        let popped = pop_and_find_next_tt(&mut tt, &compare);
-        assert_eq!(popped, Some((8, 3)));
-        let peeks: Vec<_> = tt.iter().map(|it| it.peek()).collect();
-        assert_eq!(peeks, vec![None, None, None, None, None, None, None, None]);
-
-        let popped = pop_and_find_next_tt(&mut tt, &compare);
-        assert_eq!(popped, None);
-        let peeks: Vec<_> = tt.iter().map(|it| it.peek()).collect();
-        assert_eq!(peeks, vec![None, None, None, None, None, None, None, None]);
-    }
-
-    #[test]
-    fn test_pop_and_find_next_tt_2() {
-        let iters = new_iters2();
-        let compare = IndexedPeekedIteratorComparator::from(compare::natural());
-        let mut tt = init_tt(iters, &compare);
-
-        let popped = pop_and_find_next_tt(&mut tt, &compare);
-        assert_eq!(popped, Some((2, 0)));
-        let peeks: Vec<_> = tt.iter().map(|it| it.peek()).collect();
-        assert_eq!(
-            peeks,
-            vec![Some(&(3, 2)), Some(&(5, 1)), Some(&(7, 0)), Some(&(4, 3))]
-        );
-
-        let popped = pop_and_find_next_tt(&mut tt, &compare);
-        assert_eq!(popped, Some((3, 2)));
-        let peeks: Vec<_> = tt.iter().map(|it| it.peek()).collect();
-        assert_eq!(
-            peeks,
-            vec![Some(&(4, 3)), Some(&(5, 1)), Some(&(7, 0)), Some(&(6, 2))]
-        );
-
-        let popped = pop_and_find_next_tt(&mut tt, &compare);
-        assert_eq!(popped, Some((4, 3)));
-        let peeks: Vec<_> = tt.iter().map(|it| it.peek()).collect();
-        assert_eq!(
-            peeks,
-            vec![Some(&(5, 1)), Some(&(6, 2)), Some(&(7, 0)), Some(&(8, 3))]
-        );
-
-        let popped = pop_and_find_next_tt(&mut tt, &compare);
-        assert_eq!(popped, Some((5, 1)));
-        let peeks: Vec<_> = tt.iter().map(|it| it.peek()).collect();
-        assert_eq!(
-            peeks,
-            vec![Some(&(6, 2)), Some(&(7, 0)), Some(&(10, 1)), Some(&(8, 3))]
-        );
-
-        let popped = pop_and_find_next_tt(&mut tt, &compare);
-        assert_eq!(popped, Some((6, 2)));
-        let peeks: Vec<_> = tt.iter().map(|it| it.peek()).collect();
-        assert_eq!(
-            peeks,
-            vec![Some(&(7, 0)), Some(&(8, 3)), Some(&(10, 1)), None]
-        );
-
-        let popped = pop_and_find_next_tt(&mut tt, &compare);
-        assert_eq!(popped, Some((7, 0)));
-        let peeks: Vec<_> = tt.iter().map(|it| it.peek()).collect();
-        assert_eq!(peeks, vec![Some(&(8, 3)), Some(&(10, 1)), None, None]);
-
-        let popped = pop_and_find_next_tt(&mut tt, &compare);
-        assert_eq!(popped, Some((8, 3)));
-        let peeks: Vec<_> = tt.iter().map(|it| it.peek()).collect();
-        assert_eq!(peeks, vec![Some(&(10, 1)), None, None, None]);
-
-        let popped = pop_and_find_next_tt(&mut tt, &compare);
-        assert_eq!(popped, Some((10, 1)));
-        let peeks: Vec<_> = tt.iter().map(|it| it.peek()).collect();
-        assert_eq!(peeks, vec![None, None, None, None]);
-
-        let popped = pop_and_find_next_tt(&mut tt, &compare);
-        assert_eq!(popped, None);
-        let peeks: Vec<_> = tt.iter().map(|it| it.peek()).collect();
-        assert_eq!(peeks, vec![None, None, None, None]);
-    }
-
-    #[test]
-    fn test_pop_and_find_next_tt_3() {
-        let iters = new_iters3();
-        let compare = IndexedPeekedIteratorComparator::from(compare::natural());
-        let mut tt = init_tt(iters, &compare);
-
-        let popped = pop_and_find_next_tt(&mut tt, &compare);
-        assert_eq!(popped, Some((2, 0)));
-        let peeks: Vec<_> = tt.iter().map(|it| it.peek()).collect();
-        assert_eq!(peeks, vec![Some(&(4, 0))]);
-
-        let popped = pop_and_find_next_tt(&mut tt, &compare);
-        assert_eq!(popped, Some((4, 0)));
-        let peeks: Vec<_> = tt.iter().map(|it| it.peek()).collect();
-        assert_eq!(peeks, vec![Some(&(5, 0))]);
-
-        let popped = pop_and_find_next_tt(&mut tt, &compare);
-        assert_eq!(popped, Some((5, 0)));
-        let peeks: Vec<_> = tt.iter().map(|it| it.peek()).collect();
-        assert_eq!(peeks, vec![None]);
-
-        let popped = pop_and_find_next_tt(&mut tt, &compare);
-        assert_eq!(popped, None);
-        let peeks: Vec<_> = tt.iter().map(|it| it.peek()).collect();
-        assert_eq!(peeks, vec![None]);
-    }
-}
-
-impl<'a, T: 'a, C: Compare<T, T> + 'a> MultiWayUnion<'a, T, C> {
+impl<'a, T: 'a, C: Compare<T, T> + Clone + 'a> MultiWayUnion<'a, T, C> {
     /// Construct new instance from homogeneous collection of iterators. There
     /// should be at least one iterator.
     pub fn new<I: Iterator<Item = T> + 'a>(
@@ -633,25 +242,23 @@ impl<'a, T: 'a, C: Compare<T, T> + 'a> MultiWayUnion<'a, T, C> {
         iters: impl IntoIterator<Item = Box<dyn Iterator<Item = T> + 'a>>,
         compare: C,
     ) -> Self {
-        let iters: Vec<_> = iters.into_iter().collect();
-        let n_iters = iters.len();
-        assert!(n_iters > 0);
-        let n_iters_total = n_iters.next_power_of_two();
-        let sentinels: Vec<_> = (iters.len()..n_iters_total)
-            .map(|_| Box::new(NoneIter::new()) as Box<dyn Iterator<Item = T>>)
-            .collect();
         let iters: Vec<_> = iters
             .into_iter()
-            .chain(sentinels.into_iter())
-            .zip(0..n_iters_total)
-            .map(|(it, index)| IndexedPeekedIterator::new(it, index))
+            .zip(Count::new())
+            .map(|(it, n)| IndexedPeekedIterator::new(it, n))
             .collect();
-        let compare = IndexedPeekedIteratorComparator::from(compare);
-        let tt = init_tt(iters, &compare);
+        assert!(!iters.is_empty());
+        // Was written as `let comparator = IndexedPeekedIteratorComparator::from(compare).rev()`.
+        // Changed due to compiler's suggestion.
+        let comparator = <IndexedPeekedIteratorComparator<T, C> as Compare<
+            IndexedPeekedIterator<Box<dyn Iterator<Item = T>>>,
+        >>::rev(IndexedPeekedIteratorComparator::from(
+            compare.clone(),
+        ));
+        let bh = BinaryHeap::from_vec_cmp(iters, comparator);
         Self {
-            tt,
-            len: n_iters,
-            compare,
+            bh,
+            inner_comparator: compare,
         }
     }
 
@@ -660,53 +267,52 @@ impl<'a, T: 'a, C: Compare<T, T> + 'a> MultiWayUnion<'a, T, C> {
     }
 }
 
-/// Pop from the tournament tree (`tt`) all elements whose value is equal to
-/// `value`, comparing using `compare`, and collect them if the output vec
-/// (`out`) is provided. When `out` is provided, it should already be
-/// initialized. If `out` is provided, it's guaranteed that after the call, it
-/// will contain at least one element `value` at index `index`.
-fn find_equal_value_and_collect<T, C: Compare<T, T>>(
-    tt: &mut [IndexedPeekedIterator<Box<dyn Iterator<Item = T> + '_>>],
-    value: T,
-    index: usize,
-    compare: &IndexedPeekedIteratorComparator<T, C>,
-    mut out: Option<&mut Vec<Option<T>>>,
-) {
-    // Loop and pop from the tournament tree until we don't need to pop.
-    loop {
-        // Peek the tournament tree and decide if the tree needs to be popped.
-        // The answer is yes, if the next value is equal to `value`, different
-        // only in `index`.
-        // SAFETY: tt.len() is a power of 2.
-        let need_pop_next = match unsafe { tt.get_unchecked(0).peek() } {
-            None => false,
-            Some((value_to_pop, _)) => {
-                match compare.inner.compare(&value, value_to_pop) {
-                    Ordering::Less | Ordering::Greater => false,
-                    Ordering::Equal => true,
-                }
-            }
-        };
-        // Break out from the loop.
-        if !need_pop_next {
-            break;
-        }
-        // Pop from the tournament tree.
-        // SAFETY: already checked `need_pop_next`.
-        let (next_value, next_index) =
-            unsafe { pop_and_find_next_tt(tt, compare).unwrap_unchecked() };
-        // If the output vec, `out`, is provided, and if the popped element is
-        // not from a sentinel (if it's from a sentinel, `next_index` will be
-        // `>= v.len()`), insert `next_value` to the output vector.
-        if let Some(ref mut v) = out {
-            if let Some(pos) = v.get_mut(next_index) {
-                pos.get_or_insert(next_value);
-            }
-        }
+impl<'a, T, C: Compare<T, T>> MultiWayUnion<'a, T, C> {
+    /// Initialize the output vec of `Iterator::next()`.
+    #[inline]
+    fn init_next_output(&self) -> Vec<Option<T>> {
+        // Why not use `vec![None; self.tt.len()]`: T is not Clone.
+        (0..self.bh.len()).map(|_| None).collect()
     }
-    // Finally, if the output vec, `out`, is provided, insert `value` to it.
-    if let Some(ref mut v) = out {
-        v.get_mut(index).unwrap().get_or_insert(value);
+
+    /// Isolate `self.bh.peek_mut` inside a function to prevent the mutable
+    /// reference from being leaked.
+    #[inline]
+    fn peek_mut_next(&mut self) -> Option<(T, usize)> {
+        self.bh.peek_mut().unwrap().next()
+    }
+
+    /// Pop from the heap all elements whose value is equal to `value`, and
+    /// collect them if the output vec (`out`) is provided. When `out` is not
+    /// `None`, it should already be initialized to contain `self.bh.len()`
+    /// elements. `out` is guaranteed to contain at least one element `value`
+    /// at index `index` if it's not `None`.
+    fn pop_equal_value_and_collect(
+        &mut self,
+        value: T,
+        index: usize,
+        mut out: Option<&mut Vec<Option<T>>>,
+    ) {
+        // Loop and pop until the top element in the heap is not equal to
+        // `value`. The equality is decided by `self.inner_comparator`.
+        while self
+            .bh
+            .peek()
+            .unwrap()
+            .peek()
+            .filter(|(value_to_pop, _)| {
+                self.inner_comparator.compares_eq(value_to_pop, &value)
+            })
+            .is_some()
+        {
+            let (value_to_pop, index_to_pop) = self.peek_mut_next().unwrap();
+            if let Some(ref mut v) = out {
+                v.get_mut(index_to_pop).unwrap().get_or_insert(value_to_pop);
+            }
+        }
+        if let Some(ref mut v) = out {
+            v.get_mut(index).unwrap().get_or_insert(value);
+        }
     }
 }
 
@@ -714,28 +320,18 @@ impl<'a, T, C: Compare<T, T>> Iterator for MultiWayUnion<'a, T, C> {
     type Item = Vec<Option<T>>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        match pop_and_find_next_tt(&mut self.tt, &self.compare) {
+        match self.peek_mut_next() {
             None => None,
             Some((value, index)) => {
-                // Why not use `vec![None; self.tt.len()]`: T is not Clone.
-                let mut ret = Vec::with_capacity(self.len);
-                for _ in 0..self.len {
-                    ret.push(None);
-                }
-                find_equal_value_and_collect(
-                    &mut self.tt,
-                    value,
-                    index,
-                    &self.compare,
-                    Some(&mut ret),
-                );
-                Some(ret)
+                let mut v = self.init_next_output();
+                self.pop_equal_value_and_collect(value, index, Some(&mut v));
+                Some(v)
             }
         }
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
-        self.tt.iter().fold((0, Some(0)), |(cmin, cmax), it| {
+        self.bh.iter().fold((0, Some(0)), |(cmin, cmax), it| {
             let (imin, imax) = it.size_hint();
             // Full overlap.
             let cmin = cmp::max(cmin, imin);
@@ -750,30 +346,21 @@ impl<'a, T, C: Compare<T, T>> Iterator for MultiWayUnion<'a, T, C> {
         // Similar to `next()`, but don't allocate memory for return in the
         // first n-1 rounds.
         loop {
-            match pop_and_find_next_tt(&mut self.tt, &self.compare) {
+            match self.peek_mut_next() {
                 None => break None,
                 Some((value, index)) => {
-                    let mut ret = if n == 0 {
-                        let mut v: Vec<Option<T>> =
-                            Vec::with_capacity(self.len);
-                        for _ in 0..self.len {
-                            v.push(None);
-                        }
-                        Some(v)
-                    } else {
-                        None
-                    };
-                    find_equal_value_and_collect(
-                        &mut self.tt,
-                        value,
-                        index,
-                        &self.compare,
-                        ret.as_mut(),
-                    );
                     if n == 0 {
-                        break ret;
+                        let mut v = self.init_next_output();
+                        self.pop_equal_value_and_collect(
+                            value,
+                            index,
+                            Some(&mut v),
+                        );
+                        break Some(v);
+                    } else {
+                        self.pop_equal_value_and_collect(value, index, None);
+                        n -= 1;
                     }
-                    n -= 1;
                 }
             }
         }
@@ -781,7 +368,7 @@ impl<'a, T, C: Compare<T, T>> Iterator for MultiWayUnion<'a, T, C> {
 }
 
 #[cfg(test)]
-mod multi_way_union_tests {
+mod multiway_union_tests {
     use super::MultiWayUnion;
     use compare::Compare;
     use std::cmp::Ordering;
@@ -799,6 +386,7 @@ mod multi_way_union_tests {
         }};
     }
 
+    #[derive(Copy, Clone)]
     struct FirstComparator;
 
     impl Compare<(i32, char), (i32, char)> for FirstComparator {
@@ -815,7 +403,8 @@ mod multi_way_union_tests {
         let c =
             vec![(0, 'j'), (2, 'k'), (3, 'l'), (5, 'm'), (7, 'n'), (8, 'o')]
                 .into_iter();
-        let mut u = MultiWayUnion::new([a, b, c], FirstComparator).into_boxed();
+        let mut u =
+            MultiWayUnion::new([a, b, c], FirstComparator).into_boxed();
         assert_size_hint!(u, 9, Some(9));
         assert_eq!(u.next(), Some(vec![None, Some((0, 'e')), Some((0, 'j'))]));
         assert_size_hint!(u, 8, Some(8));
@@ -869,302 +458,8 @@ mod multi_way_union_tests {
         let c =
             vec![(0, 'j'), (2, 'k'), (3, 'l'), (5, 'm'), (7, 'n'), (8, 'o')]
                 .into_iter();
-        let mut u = MultiWayUnion::new([a, b, c], FirstComparator).into_boxed();
-        assert_eq!(u.nth(4), Some(vec![None, Some((4, 'g')), None]));
-        assert_eq!(
-            u.nth(0),
-            Some(vec![Some((5, 'c')), Some((5, 'h')), Some((5, 'm'))])
-        );
-        assert_eq!(u.nth(5), None);
-    }
-}
-
-struct Count {
-    n: usize,
-}
-
-impl Count {
-    fn new() -> Self {
-        Self { n: 0 }
-    }
-}
-
-impl Iterator for Count {
-    type Item = usize;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        let n = self.n;
-        self.n += 1;
-        Some(n)
-    }
-}
-
-/// Visits the values representing the union of `K>0` *strictly* sorted
-/// iterators, comparing with `compare`. Yields `Vec<Option<T>>` of length `K`.
-///
-/// Usage example:
-///
-/// ```
-/// use sorted_iter::MultiWayUnionH;
-///
-/// fn using_multi_way_union() {
-///     let v1 = vec![3, 5];
-///     let v2 = vec![2, 3];
-///     let v3 = vec![2, 3, 5];
-///     let mut um = MultiWayUnionH::new(
-///         [v1.into_iter(), v2.into_iter(), v3.into_iter()],
-///         compare::natural(),
-///     );
-///     assert_eq!(um.next(), Some(vec![None, Some(2), Some(2)]));
-///     assert_eq!(um.next(), Some(vec![Some(3), Some(3), Some(3)]));
-///     assert_eq!(um.next(), Some(vec![Some(5), None, Some(5)]));
-///     assert_eq!(um.next(), None);
-/// }
-/// ```
-pub struct MultiWayUnionH<'a, T, C: Compare<T, T>> {
-    bh: BinaryHeap<
-        IndexedPeekedIterator<Box<dyn Iterator<Item = T> + 'a>>,
-        Rev<IndexedPeekedIteratorComparator<T, C>>,
-    >,
-    /// A copy of the inner comparator used in the heap. This would be
-    /// unnecessary if we were able to access the comparator of the heap.
-    inner_comparator: C,
-}
-
-impl<'a, T: 'a, C: Compare<T, T> + Clone + 'a> MultiWayUnionH<'a, T, C> {
-    /// Construct new instance from homogeneous collection of iterators. There
-    /// should be at least one iterator.
-    pub fn new<I: Iterator<Item = T> + 'a>(
-        iters: impl IntoIterator<Item = I>,
-        compare: C,
-    ) -> Self {
-        Self::from_boxed(iters.into_iter().map(box_iterator), compare)
-    }
-
-    /// Construct new instance from collection of boxed iterators. There should
-    /// be at least one iterator.
-    pub fn from_boxed(
-        iters: impl IntoIterator<Item = Box<dyn Iterator<Item = T> + 'a>>,
-        compare: C,
-    ) -> Self {
-        let iters: Vec<_> = iters
-            .into_iter()
-            .zip(Count::new())
-            .map(|(it, n)| IndexedPeekedIterator::new(it, n))
-            .collect();
-        assert!(!iters.is_empty());
-        // Was written as `let comparator = IndexedPeekedIteratorComparator::from(compare).rev()`.
-        // Changed due to compiler's suggestion.
-        let comparator = <IndexedPeekedIteratorComparator<T, C> as Compare<
-            IndexedPeekedIterator<Box<dyn Iterator<Item = T>>>,
-        >>::rev(IndexedPeekedIteratorComparator::from(
-            compare.clone(),
-        ));
-        let bh = BinaryHeap::from_vec_cmp(iters, comparator);
-        Self {
-            bh,
-            inner_comparator: compare,
-        }
-    }
-
-    pub fn into_boxed(self) -> Box<dyn Iterator<Item = Vec<Option<T>>> + 'a> {
-        Box::new(self)
-    }
-}
-
-impl<'a, T, C: Compare<T, T>> MultiWayUnionH<'a, T, C> {
-    /// Initialize the output vec of `Iterator::next()`.
-    #[inline]
-    fn init_next_output(&self) -> Vec<Option<T>> {
-        // Why not use `vec![None; self.tt.len()]`: T is not Clone.
-        (0..self.bh.len()).map(|_| None).collect()
-    }
-
-    /// Isolate `self.bh.peek_mut` inside a function to prevent the mutable
-    /// reference from being leaked.
-    #[inline]
-    fn peek_mut_next(&mut self) -> Option<(T, usize)> {
-        self.bh.peek_mut().unwrap().next()
-    }
-
-    /// Pop from the heap all elements whose value is equal to `value`, and
-    /// collect them if the output vec (`out`) is provided. When `out` is not
-    /// `None`, it should already be initialized to contain `self.bh.len()`
-    /// elements. `out` is guaranteed to contain at least one element `value`
-    /// at index `index` if it's not `None`.
-    fn pop_equal_value_and_collect(
-        &mut self,
-        value: T,
-        index: usize,
-        mut out: Option<&mut Vec<Option<T>>>,
-    ) {
-        // Loop and pop until the top element in the heap is not equal to
-        // `value`. The equality is decided by `self.inner_comparator`.
-        while self
-            .bh
-            .peek()
-            .unwrap()
-            .peek()
-            .filter(|(value_to_pop, _)| {
-                self.inner_comparator.compares_eq(value_to_pop, &value)
-            })
-            .is_some()
-        {
-            let (value_to_pop, index_to_pop) = self.peek_mut_next().unwrap();
-            if let Some(ref mut v) = out {
-                v.get_mut(index_to_pop).unwrap().get_or_insert(value_to_pop);
-            }
-        }
-        if let Some(ref mut v) = out {
-            v.get_mut(index).unwrap().get_or_insert(value);
-        }
-    }
-}
-
-impl<'a, T, C: Compare<T, T>> Iterator for MultiWayUnionH<'a, T, C> {
-    type Item = Vec<Option<T>>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        match self.peek_mut_next() {
-            None => None,
-            Some((value, index)) => {
-                let mut v = self.init_next_output();
-                self.pop_equal_value_and_collect(value, index, Some(&mut v));
-                Some(v)
-            }
-        }
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        self.bh.iter().fold((0, Some(0)), |(cmin, cmax), it| {
-            let (imin, imax) = it.size_hint();
-            // Full overlap.
-            let cmin = cmp::max(cmin, imin);
-            // No overlap.
-            let cmax = cmax
-                .and_then(|cmax| imax.and_then(|imax| cmax.checked_add(imax)));
-            (cmin, cmax)
-        })
-    }
-
-    fn nth(&mut self, mut n: usize) -> Option<Self::Item> {
-        // Similar to `next()`, but don't allocate memory for return in the
-        // first n-1 rounds.
-        loop {
-            match self.peek_mut_next() {
-                None => break None,
-                Some((value, index)) => {
-                    if n == 0 {
-                        let mut v = self.init_next_output();
-                        self.pop_equal_value_and_collect(
-                            value,
-                            index,
-                            Some(&mut v),
-                        );
-                        break Some(v);
-                    } else {
-                        self.pop_equal_value_and_collect(value, index, None);
-                        n -= 1;
-                    }
-                }
-            }
-        }
-    }
-}
-
-#[cfg(test)]
-mod multiway_union_h_tests {
-    use super::MultiWayUnionH;
-    use compare::Compare;
-    use std::cmp::Ordering;
-
-    macro_rules! assert_size_hint {
-        ($itr:ident, $lb:expr, $ub:expr) => {{
-            let (min, max) = $itr.size_hint();
-            assert!(min <= $lb);
-            match (max, $ub) {
-                (Some(max), Some(ub)) => assert!(max >= ub),
-                (Some(max), None) => panic!("ub `{}` is not inf", max),
-                (None, Some(_)) => panic!("ub `inf` is too loose"),
-                (None, None) => (),
-            }
-        }};
-    }
-
-    #[derive(Copy, Clone)]
-    struct FirstComparator;
-
-    impl Compare<(i32, char), (i32, char)> for FirstComparator {
-        fn compare(&self, u: &(i32, char), v: &(i32, char)) -> Ordering {
-            u.0.cmp(&v.0)
-        }
-    }
-
-    #[test]
-    fn test_multi_way_union_iterator() {
-        let a = vec![(1, 'a'), (3, 'b'), (5, 'c'), (6, 'd')].into_iter();
-        let b =
-            vec![(0, 'e'), (1, 'f'), (4, 'g'), (5, 'h'), (7, 'i')].into_iter();
-        let c =
-            vec![(0, 'j'), (2, 'k'), (3, 'l'), (5, 'm'), (7, 'n'), (8, 'o')]
-                .into_iter();
         let mut u =
-            MultiWayUnionH::new([a, b, c], FirstComparator).into_boxed();
-        assert_size_hint!(u, 9, Some(9));
-        assert_eq!(u.next(), Some(vec![None, Some((0, 'e')), Some((0, 'j'))]));
-        assert_size_hint!(u, 8, Some(8));
-        assert_eq!(u.next(), Some(vec![Some((1, 'a')), Some((1, 'f')), None]));
-        assert_size_hint!(u, 7, Some(7));
-        assert_eq!(u.next(), Some(vec![None, None, Some((2, 'k'))]));
-        assert_size_hint!(u, 6, Some(6));
-        assert_eq!(u.next(), Some(vec![Some((3, 'b')), None, Some((3, 'l'))]));
-        assert_size_hint!(u, 5, Some(5));
-        assert_eq!(u.next(), Some(vec![None, Some((4, 'g')), None]));
-        assert_size_hint!(u, 4, Some(4));
-        assert_eq!(
-            u.next(),
-            Some(vec![Some((5, 'c')), Some((5, 'h')), Some((5, 'm'))])
-        );
-        assert_size_hint!(u, 3, Some(3));
-        assert_eq!(u.next(), Some(vec![Some((6, 'd')), None, None]));
-        assert_size_hint!(u, 2, Some(2));
-        assert_eq!(u.next(), Some(vec![None, Some((7, 'i')), Some((7, 'n'))]));
-        assert_size_hint!(u, 1, Some(1));
-        assert_eq!(u.next(), Some(vec![None, None, Some((8, 'o'))]));
-        assert_size_hint!(u, 0, Some(0));
-        assert_eq!(u.next(), None);
-        assert_size_hint!(u, 0, Some(0));
-        assert_eq!(u.next(), None);
-    }
-
-    #[test]
-    fn test_multi_way_union_iterator_single() {
-        let a = vec![(1, 'a'), (3, 'b'), (5, 'c'), (6, 'd')].into_iter();
-        let mut u = MultiWayUnionH::new([a], FirstComparator).into_boxed();
-        assert_size_hint!(u, 4, Some(4));
-        assert_eq!(u.next(), Some(vec![Some((1, 'a'))]));
-        assert_size_hint!(u, 3, Some(3));
-        assert_eq!(u.next(), Some(vec![Some((3, 'b'))]));
-        assert_size_hint!(u, 2, Some(2));
-        assert_eq!(u.next(), Some(vec![Some((5, 'c'))]));
-        assert_size_hint!(u, 1, Some(1));
-        assert_eq!(u.next(), Some(vec![Some((6, 'd'))]));
-        assert_size_hint!(u, 0, Some(0));
-        assert_eq!(u.next(), None);
-        assert_size_hint!(u, 0, Some(0));
-        assert_eq!(u.next(), None);
-    }
-
-    #[test]
-    fn test_multi_way_union_nth() {
-        let a = vec![(1, 'a'), (3, 'b'), (5, 'c'), (6, 'd')].into_iter();
-        let b =
-            vec![(0, 'e'), (1, 'f'), (4, 'g'), (5, 'h'), (7, 'i')].into_iter();
-        let c =
-            vec![(0, 'j'), (2, 'k'), (3, 'l'), (5, 'm'), (7, 'n'), (8, 'o')]
-                .into_iter();
-        let mut u =
-            MultiWayUnionH::new([a, b, c], FirstComparator).into_boxed();
+            MultiWayUnion::new([a, b, c], FirstComparator).into_boxed();
         assert_eq!(u.nth(4), Some(vec![None, Some((4, 'g')), None]));
         assert_eq!(
             u.nth(0),
