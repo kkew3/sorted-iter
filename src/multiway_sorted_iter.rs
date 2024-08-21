@@ -174,26 +174,6 @@ impl<I: Iterator, C: Compare<I::Item, I::Item>>
     }
 }
 
-struct Count {
-    n: usize,
-}
-
-impl Count {
-    fn new() -> Self {
-        Self { n: 0 }
-    }
-}
-
-impl Iterator for Count {
-    type Item = usize;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        let n = self.n;
-        self.n += 1;
-        Some(n)
-    }
-}
-
 /// Visits the values representing the union of `K>0` *strictly* sorted
 /// iterators, comparing with `compare`. Yields `Vec<Option<T>>` of length `K`.
 ///
@@ -244,7 +224,7 @@ impl<'a, T: 'a, C: Compare<T, T> + Clone + 'a> MultiWayUnion<'a, T, C> {
     ) -> Self {
         let iters: Vec<_> = iters
             .into_iter()
-            .zip(Count::new())
+            .zip(0..)
             .map(|(it, n)| IndexedPeekedIterator::new(it, n))
             .collect();
         assert!(!iters.is_empty());
